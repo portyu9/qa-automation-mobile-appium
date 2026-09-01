@@ -1,0 +1,32 @@
+{
+  "name": "qa-automation-mobile-appium",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Cross-platform Appium framework with deterministic capability policy, session lifecycle control, failure evidence, and explicit real-device execution boundaries.",
+  "type": "module",
+  "engines": {
+    "node": "24.20.0",
+    "npm": "11.19.1"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "lint": "node scripts/lint.mjs",
+    "docs:check": "node scripts/validate-docs.mjs",
+    "workflow-pins:check": "node scripts/validate-workflow-pins.mjs",
+    "test:framework": "npm run build && mkdir -p reports && node --test --test-reporter=tap dist/tests/framework/*.test.js > reports/framework.tap",
+    "test:evidence:check": "node scripts/validate-test-evidence.mjs reports/framework.tap 12",
+    "test": "npm run test:framework && npm run test:evidence:check",
+    "quality": "npm run lint && npm run typecheck && npm run docs:check && npm run workflow-pins:check && npm run test",
+    "appium": "appium",
+    "device:smoke": "npm run build && node dist/tests/device/smoke.device.js"
+  },
+  "dependencies": {
+    "webdriverio": "9.31.5"
+  },
+  "devDependencies": {
+    "@types/node": "^24.0.0",
+    "appium": "3.7.0",
+    "typescript": "7.0.2"
+  }
+}
