@@ -15,6 +15,7 @@ concurrency:
 
 env:
   NPM_VERSION: 11.19.1
+  NODE22_TYPES_VERSION: 22.20.1
 
 jobs:
   quality:
@@ -81,6 +82,12 @@ jobs:
           cache-dependency-path: package-lock.json
       - run: npm install --global --ignore-scripts "npm@${NPM_VERSION}"
       - run: npm ci --ignore-scripts --no-audit --no-fund
+      - name: Bind TypeScript API surface to Node 22
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm install --no-save --ignore-scripts --package-lock=false "@types/node@${NODE22_TYPES_VERSION}"
+          [[ "$(node -p "require('./node_modules/@types/node/package.json').version")" == "$NODE22_TYPES_VERSION" ]]
       - run: npm run typecheck
       - run: npm run test
 

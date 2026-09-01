@@ -12,6 +12,13 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: appium-device-smoke
+  cancel-in-progress: false
+
+env:
+  NPM_VERSION: 11.19.1
+
 jobs:
   real-device-smoke:
     runs-on: ubuntu-24.04
@@ -24,6 +31,12 @@ jobs:
           node-version-file: .nvmrc
           cache: npm
           cache-dependency-path: package-lock.json
+      - name: Pin npm runtime
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm install --global --ignore-scripts "npm@${NPM_VERSION}"
+          [[ "$(npm --version)" == "$NPM_VERSION" ]]
       - run: npm ci --ignore-scripts --no-audit --no-fund
       - name: Execute explicit device smoke
         env:
@@ -38,6 +51,7 @@ jobs:
           ANDROID_APP_ACTIVITY: ${{ vars.ANDROID_APP_ACTIVITY }}
           CLOUD_VENDOR_PREFIX: ${{ vars.CLOUD_VENDOR_PREFIX }}
           CLOUD_OPTIONS_JSON: ${{ vars.CLOUD_OPTIONS_JSON }}
+          EVIDENCE_DIR: reports/device
         run: npm run device:smoke
       - name: Upload non-secret device evidence
         if: always()
@@ -45,5 +59,5 @@ jobs:
         with:
           name: appium-device-evidence-${{ github.run_id }}
           path: reports/device/
-          if-no-files-found: warn
+          if-no-files-found: error
           retention-days: 7
