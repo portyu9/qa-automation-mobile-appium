@@ -99,6 +99,7 @@ jobs:
           scanners: vuln,misconfig,secret
           severity: HIGH,CRITICAL
           ignore-unfixed: true
+          list-all-pkgs: true
           format: json
           output: reports/security/trivy/trivy.json
           exit-code: "1"
