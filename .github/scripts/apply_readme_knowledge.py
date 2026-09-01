@@ -3,7 +3,11 @@ import re
 
 path = Path('README.md')
 text = path.read_text(encoding='utf-8')
-marker = '## Dependency maintenance\n'
+text = text.replace(
+    'The qualified deterministic runtime is **primary Node runtime** with **npm** on Ubuntu 24.04. CI also proves the declared Node compatibility contract independently and exposes a stable `CI / ci-gate` conclusion.',
+    'The qualified deterministic runtime uses the repository-designated primary Node runtime with npm on the governed Linux CI runner. CI also proves the declared Node compatibility contract independently and exposes a stable `CI / ci-gate` conclusion.'
+)
+marker = '## Repository map\n'
 section = '''## Confidence boundaries
 
 Mobile automation crosses framework policy, Appium protocol/session lifecycle, application state, device operating systems, provider infrastructure, and physical hardware. The repository keeps those confidence claims separate.
@@ -25,7 +29,7 @@ Treat device coverage as a **risk matrix**, not a count of sessions. Add platfor
 '''
 if '## Confidence boundaries\n' not in text:
     if marker not in text:
-        raise SystemExit('Dependency maintenance marker missing')
+        raise SystemExit('Repository map marker missing')
     text = text.replace(marker, section + marker)
 path.write_text(text, encoding='utf-8')
 
@@ -38,6 +42,7 @@ patterns = [
     re.compile(r'\bnpm\s+v?\d', re.I),
     re.compile(r'\bAndroid\s+\d+(?:\.\d+)*', re.I),
     re.compile(r'\biOS\s+\d+(?:\.\d+)*', re.I),
+    re.compile(r'\bUbuntu\s+\d+(?:\.\d+)*', re.I),
 ]
 candidates = []
 for md in [Path('README.md'), *Path('docs').rglob('*.md')]:
