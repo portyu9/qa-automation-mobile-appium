@@ -174,7 +174,7 @@ Evidence collection is best-effort and cannot replace the original test failure.
 
 ## CI and security
 
-The qualified deterministic runtime is **primary Node runtime** with **npm** on Ubuntu 24.04. CI also proves the declared Node compatibility contract independently and exposes a stable `CI / ci-gate` conclusion.
+The qualified deterministic runtime uses the repository-designated primary Node runtime with npm on the governed Linux CI runner. CI also proves the declared Node compatibility contract independently and exposes a stable `CI / ci-gate` conclusion.
 
 - `ci.yml` — repository quality, strict TypeScript, deterministic framework tests, TAP evidence validation, and compatibility qualification.
 - `docs.yml` — documentation/runtime/repository-map consistency.
@@ -184,6 +184,24 @@ The qualified deterministic runtime is **primary Node runtime** with **npm** on 
 When GitHub Dependency graph is unavailable, the workflow records the limitation and keeps npm Audit and Trivy active as repository-wide controls. Those scanners are not represented as equivalent to change-aware Dependency Review.
 
 Dependabot checks npm and GitHub Actions weekly. Application binaries, platform drivers owned by a device environment, provider accounts, and signing credentials intentionally remain outside the repository dependency graph.
+
+## Confidence boundaries
+
+Mobile automation crosses framework policy, Appium protocol/session lifecycle, application state, device operating systems, provider infrastructure, and physical hardware. The repository keeps those confidence claims separate.
+
+| Signal | Confidence gained | Deliberate limit |
+| --- | --- | --- |
+| Framework/session-manager contracts | Capability construction, runtime validation, session ownership, teardown precedence, sanitization, and evidence policy behave deterministically with controlled doubles | They do not prove that an Appium server, driver, application binary, emulator, simulator, cloud device, or physical device is reachable or compatible |
+| Capability policy | Platform, target, reset behavior, cloud-option structure, and secret-like configuration are validated before session creation | Valid capabilities are admissible configuration, not proof that a provider accepts them or that the requested device exists |
+| Screen/page abstractions | Application interactions and assertions have stable ownership without hiding the underlying WebdriverIO/Appium session model | A screen abstraction cannot make an unstable locator, inaccessible element, or unsupported platform behavior reliable |
+| Failure evidence before teardown | A primary test failure can retain bounded diagnostics while teardown/evidence failures cannot silently replace the original cause | Captured evidence may still be incomplete if the device/provider is unreachable or the session is already irrecoverable |
+| Manual real-device smoke | A protected environment can create a real session, retrieve meaningful application hierarchy/context information, and close the session with retained sanitized evidence | One successful device/provider/platform run is not universal device, OS, form-factor, locale, network, permission, performance, or application coverage |
+| Serialized device workflow | Concurrent manual runs do not intentionally compete for the repository's shared device-lab execution slot | Serialization does not create provider capacity, eliminate external queueing, or guarantee device availability |
+| Success summary artifact | A green device run retains non-secret platform/device/context/capability evidence rather than relying only on logs | The summary proves the executed session boundary, not user-journey correctness beyond the smoke assertions |
+| Deterministic CI | Framework behavior remains testable without requiring paid cloud devices or lab availability | Green deterministic CI deliberately cannot substitute for real-device qualification |
+| CodeQL / npm Audit / Trivy / dependency review | Independent controls inspect source, advisory, repository/configuration/secret, and dependency-diff surfaces | Green scanners are scoped evidence, not proof of vulnerability absence |
+
+Treat device coverage as a **risk matrix**, not a count of sessions. Add platforms, OS generations, form factors, locales, permission states, networks, and providers only when product risk requires them; do not confuse one broad matrix with deterministic framework health.
 
 ## Repository map
 
