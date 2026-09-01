@@ -1,0 +1,166 @@
+name: security
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  schedule:
+    - cron: "41 6 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: security-${{ github.repository }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+env:
+  NPM_VERSION: 11.19.1
+
+jobs:
+  supply-chain-policy:
+    name: Supply-chain policy
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version-file: .nvmrc
+      - run: node scripts/validate-workflow-pins.mjs
+      - run: node --check scripts/validate-security-evidence.mjs
+
+  codeql:
+    name: CodeQL
+    needs: supply-chain-policy
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
+    permissions:
+      actions: read
+      contents: read
+      security-events: write
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: github/codeql-action/init@cdf488f595d80d6e07e03d4674febd5ab45fa938 # v4.37.9
+        with:
+          languages: javascript-typescript
+          queries: security-extended
+      - uses: github/codeql-action/analyze@cdf488f595d80d6e07e03d4674febd5ab45fa938 # v4.37.9
+
+  npm-audit:
+    name: npm audit
+    needs: supply-chain-policy
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+          cache-dependency-path: package-lock.json
+      - run: npm install --global --ignore-scripts "npm@${NPM_VERSION}"
+      - name: Audit committed graph
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p reports/security/npm
+          set +e
+          npm audit --audit-level=high --json > reports/security/npm/audit.json
+          status=$?
+          set -e
+          node scripts/validate-security-evidence.mjs npm-audit reports/security/npm/audit.json
+          exit "$status"
+      - if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: appium-npm-audit
+          path: reports/security/npm/
+          if-no-files-found: error
+          retention-days: 14
+
+  trivy:
+    name: Trivy
+    needs: supply-chain-policy
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - run: mkdir -p reports/security/trivy
+      - uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        env:
+          TRIVY_INCLUDE_DEV_DEPS: "true"
+        with:
+          version: v0.74.0
+          scan-type: fs
+          scan-ref: .
+          scanners: vuln,misconfig,secret
+          severity: HIGH,CRITICAL
+          ignore-unfixed: true
+          list-all-pkgs: true
+          format: json
+          output: reports/security/trivy/trivy.json
+          exit-code: "1"
+      - name: Require attributed scanner evidence
+        if: always()
+        run: node scripts/validate-security-evidence.mjs trivy reports/security/trivy/trivy.json
+      - if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: appium-trivy
+          path: reports/security/trivy/
+          if-no-files-found: error
+          retention-days: 14
+
+  dependency-review:
+    name: dependency-review
+    needs: supply-chain-policy
+    if: github.event_name == 'pull_request'
+    permissions:
+      contents: read
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Probe GitHub Dependency graph
+        id: graph
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if gh api -H 'Accept: application/vnd.github+json' "repos/$GITHUB_REPOSITORY/dependency-graph/sbom" >/dev/null 2>&1; then
+            echo 'available=true' >> "$GITHUB_OUTPUT"
+          else
+            echo 'available=false' >> "$GITHUB_OUTPUT"
+            echo '::warning::Dependency graph unavailable; npm Audit and Trivy remain independent repository-wide gates.'
+          fi
+      - if: steps.graph.outputs.available == 'true'
+        uses: actions/dependency-review-action@a1d282b36b6f3519aa1f3fc636f609c47dddb294 # v5.0.0
+        with:
+          fail-on-severity: high
+      - if: steps.graph.outputs.available != 'true'
+        run: echo 'Change-aware Dependency Review unavailable; fallback is explicit and not represented as equivalent.'
+
+  security-gate:
+    name: security-gate
+    if: always()
+    needs: [supply-chain-policy, codeql, npm-audit, trivy, dependency-review]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 2
+    steps:
+      - name: Evaluate security jobs
+        env:
+          SUPPLY: ${{ needs.supply-chain-policy.result }}
+          CODEQL: ${{ needs.codeql.result }}
+          AUDIT: ${{ needs.npm-audit.result }}
+          TRIVY: ${{ needs.trivy.result }}
+          REVIEW: ${{ needs.dependency-review.result }}
+          EVENT: ${{ github.event_name }}
+          SAME_REPO: ${{ github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository }}
+        run: |
+          [[ "$SUPPLY" == success ]] || exit 1
+          [[ "$AUDIT" == success ]] || exit 1
+          [[ "$TRIVY" == success ]] || exit 1
+          if [[ "$SAME_REPO" == true ]]; then [[ "$CODEQL" == success ]] || exit 1; else [[ "$CODEQL" == skipped ]] || exit 1; fi
+          if [[ "$EVENT" == pull_request ]]; then [[ "$REVIEW" == success ]] || exit 1; else [[ "$REVIEW" == skipped ]] || exit 1; fi

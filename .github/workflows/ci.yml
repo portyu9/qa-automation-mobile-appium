@@ -1,0 +1,100 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: mobile-appium-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  NPM_VERSION: 11.19.1
+
+jobs:
+  quality:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+          cache-dependency-path: package-lock.json
+      - name: Pin npm runtime
+        run: |
+          npm install --global --ignore-scripts "npm@${NPM_VERSION}"
+          [[ "$(npm --version)" == "$NPM_VERSION" ]]
+      - name: Install committed dependency graph
+        run: npm ci --ignore-scripts --no-audit --no-fund
+      - name: Initialize qualification evidence
+        run: |
+          mkdir -p reports
+          printf '%s\n' '# Appium framework qualification evidence' '' "head_sha=${GITHUB_SHA}" "run_id=${GITHUB_RUN_ID}" > reports/qualification.md
+      - name: Qualify framework contracts
+        run: npm run quality
+      - name: Publish qualification summary
+        if: always()
+        env:
+          JOB_STATUS: ${{ job.status }}
+        run: |
+          mkdir -p reports
+          {
+            echo
+            echo "status=${JOB_STATUS}"
+            echo 'scope=runtime-validation,capability-policy,session-lifecycle,evidence-redaction,screen-synchronization,docs,workflow-immutability,strict-project-types'
+            echo 'hardware_claim=none; real-device execution is isolated in the manual device-smoke workflow'
+          } >> reports/qualification.md
+          {
+            echo '### Appium framework qualification'
+            echo
+            echo "- Status: \`${JOB_STATUS}\`"
+            echo '- Scope: runtime validation, Android/iOS capability policy, session lifecycle, evidence redaction, screen synchronization, docs, workflow immutability, strict repository TypeScript'
+            echo '- Declaration boundary: third-party `.d.ts` checking is skipped; repository `.ts` sources remain under strict compiler contracts'
+            echo '- Hardware claim: none; real-device execution is isolated in the manual device-smoke workflow'
+          } >> "$GITHUB_STEP_SUMMARY"
+      - name: Upload framework evidence
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: appium-framework-evidence
+          path: reports/
+          if-no-files-found: error
+          retention-days: 14
+
+  node22-compatibility:
+    needs: quality
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: package-lock.json
+      - run: npm install --global --ignore-scripts "npm@${NPM_VERSION}"
+      - run: npm ci --ignore-scripts --no-audit --no-fund
+      - run: npm run typecheck
+      - run: npm run test
+
+  ci-gate:
+    name: ci-gate
+    if: always()
+    needs: [quality, node22-compatibility]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 2
+    steps:
+      - name: Evaluate required CI jobs
+        env:
+          QUALITY: ${{ needs.quality.result }}
+          NODE22: ${{ needs.node22-compatibility.result }}
+        run: |
+          [[ "$QUALITY" == "success" ]] || { echo "quality=$QUALITY"; exit 1; }
+          [[ "$NODE22" == "success" ]] || { echo "node22-compatibility=$NODE22"; exit 1; }

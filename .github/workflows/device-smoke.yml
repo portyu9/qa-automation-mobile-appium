@@ -1,0 +1,49 @@
+name: device-smoke
+
+on:
+  workflow_dispatch:
+    inputs:
+      platform:
+        description: Device platform supplied by the configured Appium endpoint
+        required: true
+        type: choice
+        options: [android, ios]
+
+permissions:
+  contents: read
+
+jobs:
+  real-device-smoke:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    environment: mobile-device-lab
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+          cache-dependency-path: package-lock.json
+      - run: npm ci --ignore-scripts --no-audit --no-fund
+      - name: Execute explicit device smoke
+        env:
+          APPIUM_SERVER_URL: ${{ secrets.APPIUM_SERVER_URL }}
+          MOBILE_PLATFORM: ${{ inputs.platform }}
+          DEVICE_NAME: ${{ vars.DEVICE_NAME }}
+          PLATFORM_VERSION: ${{ vars.PLATFORM_VERSION }}
+          DEVICE_UDID: ${{ vars.DEVICE_UDID }}
+          APP_PATH: ${{ vars.APP_PATH }}
+          APP_ID: ${{ vars.APP_ID }}
+          ANDROID_APP_PACKAGE: ${{ vars.ANDROID_APP_PACKAGE }}
+          ANDROID_APP_ACTIVITY: ${{ vars.ANDROID_APP_ACTIVITY }}
+          CLOUD_VENDOR_PREFIX: ${{ vars.CLOUD_VENDOR_PREFIX }}
+          CLOUD_OPTIONS_JSON: ${{ vars.CLOUD_OPTIONS_JSON }}
+        run: npm run device:smoke
+      - name: Upload non-secret device evidence
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: appium-device-evidence-${{ github.run_id }}
+          path: reports/device/
+          if-no-files-found: warn
+          retention-days: 7
