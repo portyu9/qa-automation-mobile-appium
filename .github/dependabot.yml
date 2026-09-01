@@ -11,8 +11,10 @@ updates:
     groups:
       appium-client:
         patterns: ["appium", "webdriverio"]
+        update-types: ["minor", "patch"]
       toolchain:
         patterns: ["typescript", "@types/node"]
+        update-types: ["minor", "patch"]
     commit-message:
       prefix: "deps"
       include: "scope"
