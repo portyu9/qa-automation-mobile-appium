@@ -25,8 +25,12 @@
     "webdriverio": "9.31.5"
   },
   "devDependencies": {
-    "@types/node": "^24.0.0",
+    "@types/node": "24.13.3",
     "appium": "3.7.0",
     "typescript": "7.0.2"
+  },
+  "overrides": {
+    "@puppeteer/browsers": "3.2.1",
+    "deepmerge-ts": "8.0.2"
   }
 }
