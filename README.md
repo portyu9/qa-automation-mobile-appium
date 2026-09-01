@@ -5,10 +5,10 @@
 [![Docs](https://github.com/portyu9/qa-automation-mobile-appium/actions/workflows/docs.yml/badge.svg)](https://github.com/portyu9/qa-automation-mobile-appium/actions/workflows/docs.yml)
 [![Device Smoke](https://github.com/portyu9/qa-automation-mobile-appium/actions/workflows/device-smoke.yml/badge.svg)](https://github.com/portyu9/qa-automation-mobile-appium/actions/workflows/device-smoke.yml)
 
-[![Appium](https://img.shields.io/badge/Appium-3.7.0-662D91?logo=appium&logoColor=white)](https://appium.io/)
-[![WebdriverIO](https://img.shields.io/badge/WebdriverIO-9.31.5-EA5906?logo=webdriverio&logoColor=white)](https://webdriver.io/)
-[![TypeScript](https://img.shields.io/badge/TypeScript-7.0.2-3178C6?logo=typescript&logoColor=white)](https://www.typescriptlang.org/)
-[![Node.js](https://img.shields.io/badge/Node.js-24.20.0_LTS-339933?logo=nodedotjs&logoColor=white)](https://nodejs.org/)
+[![Appium](https://img.shields.io/badge/Appium-automation-662D91?logo=appium&logoColor=white)](https://appium.io/)
+[![WebdriverIO](https://img.shields.io/badge/WebdriverIO-client-EA5906?logo=webdriverio&logoColor=white)](https://webdriver.io/)
+[![TypeScript](https://img.shields.io/badge/TypeScript-language-3178C6?logo=typescript&logoColor=white)](https://www.typescriptlang.org/)
+[![Node.js](https://img.shields.io/badge/Node.js-runtime-339933?logo=nodedotjs&logoColor=white)](https://nodejs.org/)
 [![Android](https://img.shields.io/badge/Android-UiAutomator2-3DDC84?logo=android&logoColor=white)](https://developer.android.com/)
 [![iOS](https://img.shields.io/badge/iOS-XCUITest-147EFB?logo=apple&logoColor=white)](https://developer.apple.com/documentation/xctest)
 [![W3C WebDriver](https://img.shields.io/badge/W3C-WebDriver-005A9C)](https://www.w3.org/TR/webdriver2/)
@@ -17,7 +17,7 @@
 [![License](https://img.shields.io/badge/License-MIT-2EA44F?logo=opensourceinitiative&logoColor=white)](LICENSE)
 [![Security Policy](https://img.shields.io/badge/Security-Policy-24292F?logo=github&logoColor=white)](SECURITY.md)
 
-A cross-platform mobile quality-engineering framework built around **Appium 3**, **WebdriverIO 9**, and strict TypeScript. The repository separates deterministic framework qualification from hardware-dependent execution so CI can prove configuration, W3C capability policy, session lifecycle, evidence semantics, synchronization rules, and supply-chain controls without pretending that a shared Linux runner is an Android or iOS device lab.
+A cross-platform mobile quality-engineering framework built around **Appium**, **WebdriverIO**, and strict TypeScript. The repository separates deterministic framework qualification from hardware-dependent execution so CI can prove configuration, W3C capability policy, session lifecycle, evidence semantics, synchronization rules, and supply-chain controls without pretending that a shared Linux runner is an Android or iOS device lab.
 
 > [!IMPORTANT]
 > Deterministic framework health and real-device product behavior are different quality signals. A green CI run proves the mobile automation harness is internally coherent; it does not claim that an application works across physical devices, OS versions, OEM variants, signing configurations, networks, or provider infrastructure.
@@ -28,7 +28,7 @@ A cross-platform mobile quality-engineering framework built around **Appium 3**,
 
 | Validation plane | What it proves | Default execution | Primary evidence |
 | --- | --- | --- | --- |
-| Repository quality | Lint, strict types, docs, workflow-pin policy | Node 24.20.0 / npm 11.19.1 | Command conclusions |
+| Repository quality | Lint, strict types, docs, workflow-pin policy | repository-pinned Node/npm toolchain | Command conclusions |
 | Framework contracts | Configuration, capabilities, lifecycle, waits, redaction, evidence | Node native test runner + injected session doubles | TAP with exact execution floor |
 | Android policy | W3C/Appium namespacing and UiAutomator2 capability construction | Deterministic contract tests | Capability assertions |
 | iOS policy | W3C/Appium namespacing and XCUITest capability construction | Deterministic contract tests | Capability assertions |
@@ -174,7 +174,7 @@ Evidence collection is best-effort and cannot replace the original test failure.
 
 ## CI and security
 
-The qualified deterministic runtime is **Node 24.20.0** with **npm 11.19.1** on Ubuntu 24.04. CI also proves the declared Node compatibility contract independently and exposes a stable `CI / ci-gate` conclusion.
+The qualified deterministic runtime is **primary Node runtime** with **npm** on Ubuntu 24.04. CI also proves the declared Node compatibility contract independently and exposes a stable `CI / ci-gate` conclusion.
 
 - `ci.yml` — repository quality, strict TypeScript, deterministic framework tests, TAP evidence validation, and compatibility qualification.
 - `docs.yml` — documentation/runtime/repository-map consistency.
