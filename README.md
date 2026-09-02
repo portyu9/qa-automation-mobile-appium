@@ -34,7 +34,7 @@ A cross-platform mobile quality-engineering framework built around **Appium**, *
 | iOS policy | W3C/Appium namespacing and XCUITest capability construction | Deterministic contract tests | Capability assertions |
 | Session lifecycle | Connect → execute → capture-on-failure → delete-session semantics | Injected WebdriverIO connector | Lifecycle assertions |
 | Device smoke | Real hierarchy/queryability and session teardown | Manual Appium/device provider workflow | Device-session evidence |
-| Security | Source, advisory, dependency/configuration/secret and PR dependency-change signals | CodeQL + npm Audit + Trivy + Dependency Review when available | Stable `security-gate` |
+| Security | Workflow-policy, source, advisory, dependency/configuration/secret and PR dependency-change signals | Supply-chain policy + CodeQL + npm Audit + Trivy + Dependency Review when available | Stable `security-gate` |
 | Documentation | README/runtime/workflow consistency | Repository-local validator | Docs workflow status |
 
 ## Architecture
@@ -63,7 +63,8 @@ flowchart LR
     CHANGE --> DOCS[README + runtime/workflow contracts]
     DOCS --> DG[Docs / docs-contract]
 
-    SAST[CodeQL] --> SG[Security / security-gate]
+    SUPPLY[Supply-chain policy] --> SG[Security / security-gate]
+    SAST[CodeQL] --> SG
     AUDIT[npm Audit] --> SG
     TRIVY[Trivy] --> SG
     REVIEW[Dependency Review when available] --> SG
@@ -81,7 +82,7 @@ flowchart LR
     class CFG,CAP,PLATFORM,UIA,XCU,DOCS policy;
     class SESSION,WDIO,APPIUM,DEVICE,SCREEN,CONTRACT,NODE22 runtime;
     class EVIDENCE,DEVICEOUT,RESULT evidence;
-    class GATE,DG,SAST,AUDIT,TRIVY,REVIEW,SG gate;
+    class GATE,DG,SUPPLY,SAST,AUDIT,TRIVY,REVIEW,SG gate;
     linkStyle default stroke:#57606a,stroke-width:1.4px;
 ```
 
@@ -103,7 +104,7 @@ The architecture keeps four ownership boundaries explicit: runtime configuration
 | Evidence privacy | Automatic evidence is bounded and sanitizes capability/error metadata; secrets are not valid diagnostic payloads. |
 | Deterministic CI | Required CI uses session doubles and temporary evidence directories rather than pretending to provide hardware coverage. |
 | Device execution | Hardware-dependent smoke remains explicit and manually supplied with an authorized Appium endpoint/application target. |
-| Supply chain | Actions are immutable-pinned; npm Audit, Trivy, CodeQL, and Dependency Review remain independent controls. |
+| Supply chain | Workflow policy, npm Audit, Trivy, CodeQL, and Dependency Review remain independent controls. |
 
 ## Execution model
 
