@@ -1,0 +1,79 @@
+name: apply-diagram-rescan
+
+on:
+  push:
+    branches: [docs/diagram-rescan-fix]
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: docs/diagram-rescan-fix
+      - name: Correct required qualification topology in Mermaid architecture
+        shell: python
+        run: |
+          from pathlib import Path
+          p = Path('README.md')
+          s = p.read_text(encoding='utf-8')
+          old = '''    CHANGE --> CONTRACT[Deterministic framework contracts]
+    CONTRACT --> GATE[CI / ci-gate]
+    EVIDENCE --> DEVICEOUT[Device-run evidence]
+
+    SAST[CodeQL] --> SG[Security / security-gate]
+'''
+          new = '''    CHANGE --> CONTRACT[Deterministic framework contracts]
+    CONTRACT --> GATE[CI / ci-gate]
+    CHANGE --> NODE22[Node 22 compatibility contracts]
+    NODE22 --> GATE
+    EVIDENCE --> DEVICEOUT[Device-run evidence]
+
+    CHANGE --> DOCS[README + runtime/workflow contracts]
+    DOCS --> DG[Docs / docs-contract]
+
+    SAST[CodeQL] --> SG[Security / security-gate]
+'''
+          if s.count(old) != 1:
+              raise SystemExit('expected one mobile qualification fragment')
+          s = s.replace(old, new, 1)
+          old2 = '''    REVIEW[Dependency Review when available] --> SG
+
+    classDef entry fill:#ddf4ff,stroke:#0969da,color:#24292f,stroke-width:1.5px;
+'''
+          new2 = '''    REVIEW[Dependency Review when available] --> SG
+
+    GATE --> RESULT[Qualified framework change]
+    DG --> RESULT
+    SG --> RESULT
+
+    classDef entry fill:#ddf4ff,stroke:#0969da,color:#24292f,stroke-width:1.5px;
+'''
+          if s.count(old2) != 1:
+              raise SystemExit('expected one mobile result fragment')
+          s = s.replace(old2, new2, 1)
+          replacements = [
+              ('    class CFG,CAP,PLATFORM,UIA,XCU policy;\n', '    class CFG,CAP,PLATFORM,UIA,XCU,DOCS policy;\n'),
+              ('    class SESSION,WDIO,APPIUM,DEVICE,SCREEN runtime;\n', '    class SESSION,WDIO,APPIUM,DEVICE,SCREEN,CONTRACT,NODE22 runtime;\n'),
+              ('    class EVIDENCE,DEVICEOUT evidence;\n', '    class EVIDENCE,DEVICEOUT,RESULT evidence;\n'),
+              ('    class CONTRACT,GATE,SAST,AUDIT,TRIVY,REVIEW,SG gate;\n', '    class GATE,DG,SAST,AUDIT,TRIVY,REVIEW,SG gate;\n'),
+          ]
+          for a, b in replacements:
+              if s.count(a) != 1:
+                  raise SystemExit(f'expected one mobile class fragment: {a!r}')
+              s = s.replace(a, b, 1)
+          p.write_text(s, encoding='utf-8')
+      - name: Commit README correction
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add README.md
+          git diff --cached --check
+          git commit -m 'docs: align mobile Mermaid diagram with qualification gates'
+          git push origin HEAD:docs/diagram-rescan-fix
