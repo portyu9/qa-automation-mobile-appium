@@ -1,0 +1,52 @@
+name: readme-knowledge-audit-fix
+
+on:
+  push:
+    branches: [docs/readme-knowledge-audit]
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    runs-on: ubuntu-24.04
+    if: github.actor != 'github-actions[bot]'
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: docs/readme-knowledge-audit
+      - name: Align documented installation policy
+        shell: python
+        run: |
+          from pathlib import Path
+          readme = Path('README.md')
+          text = readme.read_text(encoding='utf-8')
+          old_title = '# Mobile / Appium Quality Engineering Framework'
+          new_title = '# Mobile Quality Engineering Framework — Appium + WebdriverIO'
+          if text.count(old_title) != 1:
+              raise SystemExit('current Mobile title did not match exactly once')
+          text = text.replace(old_title, new_title)
+          old_install = '\nnpm ci\n'
+          count = text.count(old_install)
+          if count != 2:
+              raise SystemExit(f'expected two plain npm ci examples, found {count}')
+          text = text.replace(old_install, '\nnpm ci --ignore-scripts --no-audit --no-fund\n')
+          readme.write_text(text, encoding='utf-8')
+
+          validator = Path('scripts/validate-docs.mjs')
+          vtext = validator.read_text(encoding='utf-8')
+          old_contract = "'# Mobile / Appium Quality Engineering Framework'"
+          new_contract = "'# Mobile Quality Engineering Framework — Appium + WebdriverIO'"
+          if vtext.count(old_contract) != 1:
+              raise SystemExit('Mobile title validator did not match exactly once')
+          validator.write_text(vtext.replace(old_contract, new_contract), encoding='utf-8')
+      - name: Commit branch-only documentation correction
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm .github/workflows/readme-knowledge-audit-fix.yml
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add README.md scripts/validate-docs.mjs .github/workflows/readme-knowledge-audit-fix.yml
+          git commit -m 'docs: align Appium qualification wording with CI policy'
+          git push origin HEAD:docs/readme-knowledge-audit
