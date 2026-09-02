@@ -56,12 +56,21 @@ flowchart LR
 
     CHANGE --> CONTRACT[Deterministic framework contracts]
     CONTRACT --> GATE[CI / ci-gate]
+    CHANGE --> NODE22[Node 22 compatibility contracts]
+    NODE22 --> GATE
     EVIDENCE --> DEVICEOUT[Device-run evidence]
+
+    CHANGE --> DOCS[README + runtime/workflow contracts]
+    DOCS --> DG[Docs / docs-contract]
 
     SAST[CodeQL] --> SG[Security / security-gate]
     AUDIT[npm Audit] --> SG
     TRIVY[Trivy] --> SG
     REVIEW[Dependency Review when available] --> SG
+
+    GATE --> RESULT[Qualified framework change]
+    DG --> RESULT
+    SG --> RESULT
 
     classDef entry fill:#ddf4ff,stroke:#0969da,color:#24292f,stroke-width:1.5px;
     classDef policy fill:#fbefff,stroke:#8250df,color:#24292f,stroke-width:1.5px;
@@ -69,10 +78,10 @@ flowchart LR
     classDef evidence fill:#dafbe1,stroke:#1a7f37,color:#24292f,stroke-width:1.5px;
     classDef gate fill:#ffebe9,stroke:#cf222e,color:#24292f,stroke-width:1.5px;
     class CHANGE entry;
-    class CFG,CAP,PLATFORM,UIA,XCU policy;
-    class SESSION,WDIO,APPIUM,DEVICE,SCREEN runtime;
-    class EVIDENCE,DEVICEOUT evidence;
-    class CONTRACT,GATE,SAST,AUDIT,TRIVY,REVIEW,SG gate;
+    class CFG,CAP,PLATFORM,UIA,XCU,DOCS policy;
+    class SESSION,WDIO,APPIUM,DEVICE,SCREEN,CONTRACT,NODE22 runtime;
+    class EVIDENCE,DEVICEOUT,RESULT evidence;
+    class GATE,DG,SAST,AUDIT,TRIVY,REVIEW,SG gate;
     linkStyle default stroke:#57606a,stroke-width:1.4px;
 ```
 
