@@ -2,7 +2,7 @@ import { access, readFile } from 'node:fs/promises';
 
 const readme = await readFile('README.md', 'utf8');
 const required = [
-  '# Mobile Automation with Appium',
+  '# Mobile Quality Engineering Framework — Appium + WebdriverIO',
   '## Capability map',
   '## Architecture',
   '## Execution model',
@@ -26,9 +26,13 @@ for (const fragment of required) {
 
 if (/portfolio/i.test(readme)) throw new Error('README must remain neutral technical documentation');
 
-for (const workflow of ['ci.yml', 'security.yml', 'docs.yml', 'device-smoke.yml']) {
+for (const workflow of ['ci.yml', 'security.yml', 'docs.yml']) {
   const badge = `actions/workflows/${workflow}/badge.svg`;
   if (!readme.includes(badge)) throw new Error(`README workflow badge is missing: ${workflow}`);
+}
+
+if (!readme.includes('https://img.shields.io/badge/Device%20Smoke-manual-8250DF') || !readme.includes('actions/workflows/device-smoke.yml')) {
+  throw new Error('README must identify device-smoke as a manual workflow without implying continuous status');
 }
 
 const mermaid = readme.match(/```mermaid\s*\n([\s\S]*?)```/u)?.[1];
