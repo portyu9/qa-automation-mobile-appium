@@ -1,4 +1,4 @@
-# Mobile Automation with Appium
+# Mobile / Appium Quality Engineering Framework
 
 [![CI](https://github.com/portyu9/qa-automation-mobile-appium/actions/workflows/ci.yml/badge.svg)](https://github.com/portyu9/qa-automation-mobile-appium/actions/workflows/ci.yml)
 [![Security](https://github.com/portyu9/qa-automation-mobile-appium/actions/workflows/security.yml/badge.svg)](https://github.com/portyu9/qa-automation-mobile-appium/actions/workflows/security.yml)
