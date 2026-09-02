@@ -3,7 +3,7 @@
 [![CI](https://github.com/portyu9/qa-automation-mobile-appium/actions/workflows/ci.yml/badge.svg)](https://github.com/portyu9/qa-automation-mobile-appium/actions/workflows/ci.yml)
 [![Security](https://github.com/portyu9/qa-automation-mobile-appium/actions/workflows/security.yml/badge.svg)](https://github.com/portyu9/qa-automation-mobile-appium/actions/workflows/security.yml)
 [![Docs](https://github.com/portyu9/qa-automation-mobile-appium/actions/workflows/docs.yml/badge.svg)](https://github.com/portyu9/qa-automation-mobile-appium/actions/workflows/docs.yml)
-[![Device Smoke](https://github.com/portyu9/qa-automation-mobile-appium/actions/workflows/device-smoke.yml/badge.svg)](https://github.com/portyu9/qa-automation-mobile-appium/actions/workflows/device-smoke.yml)
+[![Device Smoke](https://img.shields.io/badge/Device%20Smoke-manual-8250DF?logo=githubactions&logoColor=white)](https://github.com/portyu9/qa-automation-mobile-appium/actions/workflows/device-smoke.yml)
 
 [![Appium](https://img.shields.io/badge/Appium-automation-662D91?logo=appium&logoColor=white)](https://appium.io/)
 [![WebdriverIO](https://img.shields.io/badge/WebdriverIO-client-EA5906?logo=webdriverio&logoColor=white)](https://webdriver.io/)
