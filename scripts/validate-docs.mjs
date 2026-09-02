@@ -2,7 +2,7 @@ import { access, readFile } from 'node:fs/promises';
 
 const readme = await readFile('README.md', 'utf8');
 const required = [
-  '# Mobile / Appium Quality Engineering Framework',
+  '# Mobile Quality Engineering Framework — Appium + WebdriverIO',
   '## Capability map',
   '## Architecture',
   '## Execution model',

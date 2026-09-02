@@ -1,4 +1,4 @@
-# Mobile / Appium Quality Engineering Framework
+# Mobile Quality Engineering Framework — Appium + WebdriverIO
 
 [![CI](https://github.com/portyu9/qa-automation-mobile-appium/actions/workflows/ci.yml/badge.svg)](https://github.com/portyu9/qa-automation-mobile-appium/actions/workflows/ci.yml)
 [![Security](https://github.com/portyu9/qa-automation-mobile-appium/actions/workflows/security.yml/badge.svg)](https://github.com/portyu9/qa-automation-mobile-appium/actions/workflows/security.yml)
@@ -101,7 +101,7 @@ The architecture keeps four ownership boundaries explicit: runtime configuration
 `npm run quality` is the deterministic qualification gate. It performs repository policy checks, strict TypeScript validation, documentation validation, immutable workflow validation, framework tests, and TAP evidence validation. The governed framework suite uses injected session doubles and temporary evidence directories, so it can prove lifecycle and failure semantics without opening a real device connection.
 
 ```bash
-npm ci
+npm ci --ignore-scripts --no-audit --no-fund
 npm run quality
 ```
 
@@ -148,7 +148,7 @@ The `device-smoke` workflow is manual by design. Shared GitHub-hosted Linux runn
 For local execution:
 
 ```bash
-npm ci
+npm ci --ignore-scripts --no-audit --no-fund
 npm run build
 npm run appium
 # in another shell with the validated runtime variables exported
