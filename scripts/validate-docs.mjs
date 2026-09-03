@@ -31,8 +31,8 @@ for (const workflow of ['ci.yml', 'security.yml', 'docs.yml']) {
   if (!readme.includes(badge)) throw new Error(`README workflow badge is missing: ${workflow}`);
 }
 
-if (!readme.includes('https://img.shields.io/badge/Device%20Smoke-manual-8250DF') || !readme.includes('actions/workflows/device-smoke.yml')) {
-  throw new Error('README must identify device-smoke as a manual workflow without implying continuous status');
+if (readme.includes('![Device Smoke]') || readme.includes('Device%20Smoke-manual')) {
+  throw new Error('README must not include a device-smoke badge; the externally supplied device workflow is documented in prose instead');
 }
 
 const mermaid = readme.match(/```mermaid\s*\n([\s\S]*?)```/u)?.[1];
