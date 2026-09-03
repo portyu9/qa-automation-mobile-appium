@@ -32,8 +32,12 @@ export async function captureFailureEvidence(input: FailureEvidenceInput): Promi
     schemaVersion: 1,
     capturedAt: new Date().toISOString(),
     capabilities: sanitizeForEvidence(input.capabilities),
-    error: input.error instanceof Error ? { name: input.error.name, message: input.error.message } : { message: String(input.error) },
-    evidenceCollectionWarnings: failures,
+    error: sanitizeForEvidence(
+      input.error instanceof Error
+        ? { name: input.error.name, message: input.error.message }
+        : { message: String(input.error) },
+    ),
+    evidenceCollectionWarnings: sanitizeForEvidence(failures),
   };
   await writeFile(join(directory, 'failure.json'), `${JSON.stringify(payload, null, 2)}\n`, 'utf8');
 }
