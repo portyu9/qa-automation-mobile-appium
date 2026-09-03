@@ -1,4 +1,14 @@
 const SECRET_KEY = /(token|secret|password|credential|authorization|api[_-]?key|access[_-]?key)/i;
+const SECRET_ASSIGNMENT = /((?:token|secret|password|credential|authorization|api[_-]?key|access[_-]?key)["']?\s*[:=]\s*)(?:"[^"]*"|'[^']*'|[^\s,;]+)/gi;
+const BEARER_TOKEN = /\b(Bearer)\s+[^\s,;]+/gi;
+const URL_CREDENTIALS = /\b(https?:\/\/)[^\s/:@]+:[^\s/@]+@/gi;
+
+export function sanitizeDiagnosticText(value: string): string {
+  return value
+    .replace(URL_CREDENTIALS, '$1[REDACTED]@')
+    .replace(BEARER_TOKEN, '$1 [REDACTED]')
+    .replace(SECRET_ASSIGNMENT, '$1[REDACTED]');
+}
 
 export function sanitizeForEvidence(value: unknown): unknown {
   if (Array.isArray(value)) return value.map(sanitizeForEvidence);
@@ -9,7 +19,7 @@ export function sanitizeForEvidence(value: unknown): unknown {
     }
     return out;
   }
-  return value;
+  return typeof value === 'string' ? sanitizeDiagnosticText(value) : value;
 }
 
 export function safeEvidenceName(value: string): string {
