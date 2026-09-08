@@ -16,8 +16,12 @@ const failures = [];
 const fail = (message) => failures.push(message);
 const expectedNodeEngine = '>=22.0.0 <23.0.0 || >=24.0.0 <25.0.0';
 const expectedNpm = '11.19.1';
-const nvmMatch = /^(\d+)\.(\d+)\.(\d+)$/u.exec(nvmrc);
+const exactVersion = /^(\d+)\.(\d+)\.(\d+)$/u;
+const nvmMatch = exactVersion.exec(nvmrc);
 const rootLock = packageLock.packages?.[''] ?? {};
+const primaryNodeTypes = String(packageJson.devDependencies?.['@types/node'] ?? '');
+const primaryNodeTypesMatch = exactVersion.exec(primaryNodeTypes);
+const lockedNodeTypes = packageLock.packages?.['node_modules/@types/node']?.version;
 
 if (packageJson.engines?.node !== expectedNodeEngine) {
   fail(`package.json engines.node must expose only qualified Node 22 and Node 24 lines: ${expectedNodeEngine}`);
@@ -34,6 +38,15 @@ if (rootLock.engines?.npm !== packageJson.engines?.npm) {
 if (!nvmMatch || Number(nvmMatch[1]) !== 24) {
   fail('.nvmrc must pin an exact Node 24 primary runtime');
 }
+if (!primaryNodeTypesMatch || Number(primaryNodeTypesMatch[1]) !== 24) {
+  fail('package.json @types/node must pin an exact Node 24 declaration release for the primary runtime');
+}
+if (rootLock.devDependencies?.['@types/node'] !== primaryNodeTypes) {
+  fail('package-lock.json root @types/node declaration must match package.json exactly');
+}
+if (lockedNodeTypes !== primaryNodeTypes) {
+  fail(`package-lock.json installed @types/node must equal the primary declaration pin ${primaryNodeTypes}`);
+}
 
 const ci = workflows['ci.yml'];
 if (!ci.includes(`NPM_VERSION: ${expectedNpm}`)) {
@@ -47,6 +60,25 @@ if (!/node-version:\s*22\s*$/mu.test(ci)) {
 }
 if (/node-version:\s*23(?:\D|$)/mu.test(ci)) {
   fail('ci.yml must not qualify unsupported Node 23');
+}
+
+const node22TypesMatch = /^\s*NODE22_TYPES_VERSION:\s*(\d+\.\d+\.\d+)\s*$/mu.exec(ci);
+if (!node22TypesMatch || Number(exactVersion.exec(node22TypesMatch[1])?.[1]) !== 22) {
+  fail('ci.yml must pin NODE22_TYPES_VERSION to an exact Node 22 declaration release');
+}
+if (!ci.includes('npm install --no-save --ignore-scripts --package-lock=false "@types/node@${NODE22_TYPES_VERSION}"')) {
+  fail('ci.yml Node 22 compatibility lane must install the governed NODE22_TYPES_VERSION without mutating the lockfile');
+}
+if (!ci.includes('[[ "$(node -p "require(\'./node_modules/@types/node/package.json\').version")" == "$NODE22_TYPES_VERSION" ]]')) {
+  fail('ci.yml Node 22 compatibility lane must verify the installed declaration version');
+}
+
+const npmInstallToken = 'npm install --global --ignore-scripts "npm@${NPM_VERSION}"';
+const npmVerifyToken = '[[ "$(npm --version)" == "$NPM_VERSION" ]]';
+const ciNpmInstalls = ci.split(npmInstallToken).length - 1;
+const ciNpmVerifications = ci.split(npmVerifyToken).length - 1;
+if (ciNpmInstalls !== 2 || ciNpmVerifications !== 2) {
+  fail(`ci.yml must install and verify exact npm in both Node 24 and Node 22 lanes; installs=${ciNpmInstalls}, verifies=${ciNpmVerifications}`);
 }
 
 for (const name of ['security.yml', 'docs.yml', 'device-smoke.yml']) {
@@ -82,5 +114,5 @@ if (failures.length) {
 }
 
 console.log(
-  `Runtime policy contract passed: primary=${nvmrc}, qualified=Node22+Node24, npm=${expectedNpm}, lock=aligned`,
+  `Runtime policy contract passed: primary=${nvmrc}, qualified=Node22+Node24, npm=${expectedNpm}, primary-types=${primaryNodeTypes}, node22-types=${node22TypesMatch?.[1]}, lock=aligned`,
 );
