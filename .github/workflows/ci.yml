@@ -80,7 +80,12 @@ jobs:
           node-version: 22
           cache: npm
           cache-dependency-path: package-lock.json
-      - run: npm install --global --ignore-scripts "npm@${NPM_VERSION}"
+      - name: Pin npm runtime on Node 22
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm install --global --ignore-scripts "npm@${NPM_VERSION}"
+          [[ "$(npm --version)" == "$NPM_VERSION" ]]
       - run: npm ci --ignore-scripts --no-audit --no-fund
       - name: Bind TypeScript API surface to Node 22
         shell: bash
