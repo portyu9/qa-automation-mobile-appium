@@ -1,6 +1,7 @@
 import { access, readFile } from 'node:fs/promises';
 
 const readme = await readFile('README.md', 'utf8');
+const packageJson = JSON.parse(await readFile('package.json', 'utf8'));
 const required = [
   '# Mobile Quality Engineering Framework — Appium + WebdriverIO',
   '## Capability map',
@@ -52,10 +53,18 @@ for (const line of map.split(/\r?\n/u)) {
   if (!entry.endsWith('/')) throw new Error(`Repository map must list folders only: ${entry}`);
 }
 
+if (packageJson.scripts?.['runtime-policy:check'] !== 'node scripts/validate-runtime-policy.mjs') {
+  throw new Error('package.json must expose the repository runtime policy validator');
+}
+if (!String(packageJson.scripts?.quality ?? '').includes('npm run runtime-policy:check')) {
+  throw new Error('package.json quality must retain runtime-policy:check');
+}
+
 for (const path of [
   'docs/architecture.md',
   'docs/device-execution.md',
   'docs/capability-policy.md',
+  'scripts/validate-runtime-policy.mjs',
   'SECURITY.md',
   'CONTRIBUTING.md',
 ]) {
@@ -63,5 +72,5 @@ for (const path of [
 }
 
 console.log(
-  'Documentation contract passed: required sections, workflow badges, styled Mermaid architecture, local references, and directory-only repository map are consistent.',
+  'Documentation contract passed: required sections, workflow badges, styled Mermaid architecture, runtime-policy wiring, local references, and directory-only repository map are consistent.',
 );
