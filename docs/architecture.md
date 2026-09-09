@@ -16,6 +16,16 @@ flowchart LR
   APPIUM --> DEVICE[Android / iOS target]
   SESSION --> EVIDENCE[Sanitized failure evidence]
   SESSION --> SCREEN[Screen abstractions]
+
+  classDef entry fill:#DDF4FF,stroke:#0969DA,color:#24292F,stroke-width:1.5px;
+  classDef policy fill:#FBEFFF,stroke:#8250DF,color:#24292F,stroke-width:1.5px;
+  classDef runtime fill:#FFF8C5,stroke:#9A6700,color:#24292F,stroke-width:1.5px;
+  classDef evidence fill:#DAFBE1,stroke:#1A7F37,color:#24292F,stroke-width:1.5px;
+  class ENV entry;
+  class CFG,CAP policy;
+  class SESSION,APPIUM,DEVICE,SCREEN runtime;
+  class EVIDENCE evidence;
+  linkStyle default stroke:#57606A,stroke-width:1.4px;
 ```
 
 The deterministic test layer injects a session connector rather than opening a device connection. That makes lifecycle and error semantics testable without conflating framework qualification with device qualification.
@@ -26,4 +36,4 @@ Application and framework sources are checked with TypeScript strict mode, `noUn
 
 The runtime is Node-only, so the compiler intentionally uses the ES2024 library without browser DOM globals. Mobile UI interaction occurs through the W3C WebDriver/Appium protocol rather than DOM APIs.
 
-WebdriverIO.31.5 currently permits transitive versions that are security-invalid under the repository's HIGH/CRITICAL gate. The root lock policy therefore overrides `deepmerge-ts` to the patched 8.x line and `@puppeteer/browsers` to the 3.x line that removes vulnerable `extract-zip`. Those overrides are accepted only while the full framework suite, Node compatibility job, npm Audit, and Trivy gates remain green; they should be removed when WebdriverIO's own dependency ranges incorporate equivalent fixes.
+WebdriverIO 9.31.5 currently permits transitive versions that are security-invalid under the repository's HIGH/CRITICAL gate. The root lock policy therefore overrides `deepmerge-ts` to the patched 8.x line and `@puppeteer/browsers` to the 3.x line that removes vulnerable `extract-zip`. Those overrides are accepted only while the full framework suite, Node compatibility job, npm Audit, and Trivy gates remain green; they should be removed when WebdriverIO's own dependency ranges incorporate equivalent fixes.
