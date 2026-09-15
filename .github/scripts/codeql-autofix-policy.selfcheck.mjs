@@ -4,6 +4,7 @@ import test from 'node:test';
 import {
   assessAlert,
   autofixBranchName,
+  classifyAutofixRequestError,
   validateAutofixConfig,
   validateAutofixDiff,
 } from './codeql-autofix-policy.mjs';
@@ -61,7 +62,13 @@ test('only exact-current-main open CodeQL alerts are eligible', () => {
   assert.equal(assessAlert(alert({ number: 999 }), config, BASE).eligible, false);
   assert.equal(
     assessAlert(
-      alert({ most_recent_instance: { ref: 'refs/heads/main', commit_sha: 'b'.repeat(40), location: { path: 'src/x.ts' } } }),
+      alert({
+        most_recent_instance: {
+          ref: 'refs/heads/main',
+          commit_sha: 'b'.repeat(40),
+          location: { path: 'src/x.ts' },
+        },
+      }),
       config,
       BASE,
     ).eligible,
@@ -69,10 +76,40 @@ test('only exact-current-main open CodeQL alerts are eligible', () => {
   );
   assert.equal(
     assessAlert(
-      alert({ most_recent_instance: { ref: 'refs/pull/1/merge', commit_sha: BASE, location: { path: 'src/x.ts' } } }),
+      alert({
+        most_recent_instance: {
+          ref: 'refs/pull/1/merge',
+          commit_sha: BASE,
+          location: { path: 'src/x.ts' },
+        },
+      }),
       config,
       BASE,
     ).eligible,
+    false,
+  );
+});
+
+test('unsupported Autofix is a clean terminal outcome, not a controller failure', () => {
+  const unsupported = classifyAutofixRequestError({
+    status: 422,
+    message: 'Alert is not supported by autofix. - https://docs.github.com/rest/code-scanning/code-scanning#create-an-autofix-for-a-code-scanning-alert',
+  });
+  assert.equal(unsupported.unsupported, true);
+  assert.equal(unsupported.status, 422);
+  assert.match(unsupported.reason, /does not support this alert/u);
+
+  assert.equal(
+    classifyAutofixRequestError({ status: 422, message: 'Validation Failed' }).unsupported,
+    false,
+  );
+  assert.equal(
+    classifyAutofixRequestError({ status: 403, message: 'Resource not accessible by integration' })
+      .unsupported,
+    false,
+  );
+  assert.equal(
+    classifyAutofixRequestError({ status: 500, message: 'Internal Server Error' }).unsupported,
     false,
   );
 });
@@ -101,7 +138,11 @@ test('autofix diff must touch the alert file and stay inside narrow source bound
 
   const workflow = validateAutofixDiff(
     compare([
-      { filename: '.github/scripts/dependency-recovery-policy.mjs', status: 'modified', changes: 2 },
+      {
+        filename: '.github/scripts/dependency-recovery-policy.mjs',
+        status: 'modified',
+        changes: 2,
+      },
       { filename: '.github/workflows/security.yml', status: 'modified', changes: 2 },
     ]),
     assessment,
@@ -111,7 +152,11 @@ test('autofix diff must touch the alert file and stay inside narrow source bound
 
   const dependency = validateAutofixDiff(
     compare([
-      { filename: '.github/scripts/dependency-recovery-policy.mjs', status: 'modified', changes: 2 },
+      {
+        filename: '.github/scripts/dependency-recovery-policy.mjs',
+        status: 'modified',
+        changes: 2,
+      },
       { filename: 'package-lock.json', status: 'modified', changes: 2 },
     ]),
     assessment,
@@ -124,7 +169,13 @@ test('structural, extension, and size ambiguity stays fail closed', () => {
   const assessment = assessAlert(alert(), config, BASE);
   assert.equal(
     validateAutofixDiff(
-      compare([{ filename: '.github/scripts/dependency-recovery-policy.mjs', status: 'renamed', changes: 2 }]),
+      compare([
+        {
+          filename: '.github/scripts/dependency-recovery-policy.mjs',
+          status: 'renamed',
+          changes: 2,
+        },
+      ]),
       assessment,
       config,
     ).eligible,
@@ -132,7 +183,13 @@ test('structural, extension, and size ambiguity stays fail closed', () => {
   );
   assert.equal(
     validateAutofixDiff(
-      compare([{ filename: '.github/scripts/dependency-recovery-policy.mjs', status: 'modified', changes: 201 }]),
+      compare([
+        {
+          filename: '.github/scripts/dependency-recovery-policy.mjs',
+          status: 'modified',
+          changes: 201,
+        },
+      ]),
       assessment,
       config,
     ).eligible,
@@ -140,13 +197,22 @@ test('structural, extension, and size ambiguity stays fail closed', () => {
   );
   assert.equal(
     validateAutofixDiff(
-      compare([{ filename: '.github/scripts/dependency-recovery-policy.txt', status: 'modified', changes: 2 }]),
+      compare([
+        {
+          filename: '.github/scripts/dependency-recovery-policy.txt',
+          status: 'modified',
+          changes: 2,
+        },
+      ]),
       { ...assessment, locationPath: '.github/scripts/dependency-recovery-policy.txt' },
       config,
     ).eligible,
     false,
   );
-  assert.equal(validateAutofixDiff({ status: 'diverged', files: [] }, assessment, config).eligible, false);
+  assert.equal(
+    validateAutofixDiff({ status: 'diverged', files: [] }, assessment, config).eligible,
+    false,
+  );
 });
 
 test('autofix branch identity is deterministic and base-bound', () => {
@@ -184,8 +250,12 @@ test('workflow and governance wiring preserve the trust boundary', () => {
 
 test('controller contains no autonomous merge or alert dismissal path', () => {
   const source = fs.readFileSync('.github/scripts/codeql-autofix-policy.mjs', 'utf8');
-  assert.doesNotMatch(source, /pulls\.merge|mergePull|enableAutoMerge|dismissed_reason|state:\s*['"]dismissed['"]/u);
+  assert.doesNotMatch(
+    source,
+    /pulls\.merge|mergePull|enableAutoMerge|dismissed_reason|state:\s*['"]dismissed['"]/u,
+  );
   assert.match(source, /draft:\s*true/u);
   assert.match(source, /createWorkflowDispatch/u);
   assert.match(source, /autofix\/commits/u);
+  assert.match(source, /state = 'unsupported'/u);
 });
