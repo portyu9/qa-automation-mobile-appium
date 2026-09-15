@@ -34,31 +34,26 @@ jobs:
           policy_path = Path('.github/scripts/dependency-recovery-policy.mjs')
           policy = policy_path.read_text()
 
-          old_lock = """  {
-            id: 'npm-lock-mismatch',
-            pattern: /(?:package\\.json.*package-lock\\.json.*not in sync|npm ci.*lock(?:file)?)/isu,
-          },"""
-          new_lock = "  { id: 'npm-lock-mismatch', matcher: matchesNpmLockMismatch },"
-          old_tls = """  {
-            id: 'tls-transient',
-            pattern: /\\bTLS\\b.*\\b(?:handshake|connection)\\b.*\\b(?:timeout|timed out|unexpected EOF)\\b/iu,
-          },"""
-          new_tls = "  { id: 'tls-transient', matcher: matchesTlsTransient },"
-
-          for old, new, label in [
-              (old_lock, new_lock, 'npm-lock-mismatch'),
-              (old_tls, new_tls, 'tls-transient'),
-          ]:
-              if policy.count(old) != 1:
-                  raise SystemExit(f'expected one exact {label} vulnerable matcher, found {policy.count(old)}')
+          substitutions = [
+              (
+                  "pattern: /(?:package\\.json.*package-lock\\.json.*not in sync|npm ci.*lock(?:file)?)/isu,",
+                  "matcher: matchesNpmLockMismatch,",
+                  'npm-lock-mismatch',
+              ),
+              (
+                  "pattern: /\\bTLS\\b.*\\b(?:handshake|connection)\\b.*\\b(?:timeout|timed out|unexpected EOF)\\b/iu,",
+                  "matcher: matchesTlsTransient,",
+                  'tls-transient',
+              ),
+          ]
+          for old, new, label in substitutions:
+              count = policy.count(old)
+              if count != 1:
+                  raise SystemExit(f'expected one exact {label} vulnerable pattern, found {count}')
               policy = policy.replace(old, new)
 
-          anchor = """function unique(values) {
-            return [...new Set(values.filter(Boolean))];
-          }
-          """
-          helpers = """
-          function anyLogLineMatches(text, predicate) {
+          helper_anchor = 'function parseTimestamp(value) {'
+          helpers = """function anyLogLineMatches(text, predicate) {
             const normalized = String(text || '').toLowerCase();
             let start = 0;
             while (start <= normalized.length) {
@@ -99,23 +94,19 @@ jobs:
               ? signature.matcher(text)
               : signature.pattern.test(text);
           }
-          """
-          if policy.count(anchor) != 1:
-              raise SystemExit('unique() anchor changed; refusing blind rewrite')
-          policy = policy.replace(anchor, anchor + helpers)
 
-          old_transient = "return TRANSIENT_LOG_SIGNATURES.filter(({ pattern }) => pattern.test(text)).map(({ id }) => id);"
-          new_transient = "return TRANSIENT_LOG_SIGNATURES.filter((signature) => signatureMatches(signature, text)).map(\n    ({ id }) => id,\n  );"
-          old_non_transient = """return NON_TRANSIENT_LOG_SIGNATURES.filter(({ pattern }) => pattern.test(text)).map(
-              ({ id }) => id,
-            );"""
-          new_non_transient = """return NON_TRANSIENT_LOG_SIGNATURES.filter((signature) => signatureMatches(signature, text)).map(
-              ({ id }) => id,
-            );"""
-          if policy.count(old_transient) != 1 or policy.count(old_non_transient) != 1:
-              raise SystemExit('signature dispatch anchors changed; refusing blind rewrite')
-          policy = policy.replace(old_transient, new_transient)
-          policy = policy.replace(old_non_transient, new_non_transient)
+          """
+          if policy.count(helper_anchor) != 1:
+              raise SystemExit('parseTimestamp anchor changed; refusing blind rewrite')
+          policy = policy.replace(helper_anchor, helpers + helper_anchor)
+
+          dispatch = '.filter(({ pattern }) => pattern.test(text))'
+          if policy.count(dispatch) != 2:
+              raise SystemExit(f'expected two signature dispatches, found {policy.count(dispatch)}')
+          policy = policy.replace(
+              dispatch,
+              '.filter((signature) => signatureMatches(signature, text))',
+          )
           policy_path.write_text(policy)
 
           selfcheck_path = Path('.github/scripts/dependency-recovery-policy.selfcheck.mjs')
@@ -154,7 +145,7 @@ jobs:
 
           rm .github/workflows/one-shot-redos-remediation.yml
           git diff --check
-          git diff -- .github/scripts/dependency-recovery-policy.mjs .github/scripts/dependency-recovery-policy.selfcheck.mjs
+          node --test .github/scripts/dependency-recovery-policy.selfcheck.mjs
       - name: Commit remediation and remove one-shot workflow
         shell: bash
         run: |
