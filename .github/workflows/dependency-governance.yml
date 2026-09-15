@@ -3,9 +3,13 @@ name: dependency-governance
 on:
   pull_request:
     paths:
+      - '.github/dependabot.yml'
       - '.github/dependency-governance.json'
+      - '.github/dependency-recovery.json'
       - '.github/scripts/dependency-governance.mjs'
       - '.github/scripts/dependency-governance.selfcheck.mjs'
+      - '.github/scripts/dependency-recovery-policy.mjs'
+      - '.github/scripts/dependency-recovery-policy.selfcheck.mjs'
       - '.github/workflows/dependency-governance.yml'
   pull_request_target:
     types: [opened, reopened, synchronize, ready_for_review]
@@ -35,6 +39,7 @@ concurrency:
 
 env:
   GOVERNANCE_CONFIG: .github/dependency-governance.json
+  RECOVERY_CONFIG: .github/dependency-recovery.json
 
 jobs:
   self-test:
@@ -54,9 +59,24 @@ jobs:
         with:
           node-version: 24
       - name: Validate governance configuration
-        run: node .github/scripts/dependency-governance.mjs --validate-config
-      - name: Exercise dependency-governance policy self-check
-        run: node --test .github/scripts/dependency-governance.selfcheck.mjs
+        run: |
+          node .github/scripts/dependency-governance.mjs --validate-config
+          node --input-type=module - <<'NODE'
+          import { readFileSync } from 'node:fs';
+          import { validateRecoveryConfig } from './.github/scripts/dependency-recovery-policy.mjs';
+
+          const config = JSON.parse(readFileSync('.github/dependency-recovery.json', 'utf8'));
+          const errors = validateRecoveryConfig(config);
+          if (errors.length > 0) {
+            throw new Error(`Invalid dependency recovery config:\n- ${errors.join('\n- ')}`);
+          }
+          console.log('dependency-recovery config: valid');
+          NODE
+      - name: Exercise dependency-governance policy self-checks
+        run: >-
+          node --test
+          .github/scripts/dependency-governance.selfcheck.mjs
+          .github/scripts/dependency-recovery-policy.selfcheck.mjs
 
   govern:
     name: govern-dependabot
@@ -79,6 +99,20 @@ jobs:
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: 24
+      - name: Attempt bounded dependency recovery
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            const { runDependencyRecovery } = await import(
+              `${process.env.GITHUB_WORKSPACE}/.github/scripts/dependency-recovery-policy.mjs`
+            );
+            await runDependencyRecovery({
+              github,
+              context,
+              core,
+              allowRerun: ${{ github.event_name == 'workflow_run' || github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' }},
+            });
       - name: Reconcile dependency governance
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
