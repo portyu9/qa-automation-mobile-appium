@@ -479,3 +479,29 @@ test('native rebasing and recovery wiring remain self-tested control plane', () 
   assert.match(workflow, /actions\/github-script@[0-9a-f]{40}/u);
   assert.match(workflow, /runDependencyRecovery/u);
 });
+
+
+test('ReDoS-sensitive matchers stay line-local and deterministic', () => {
+  assert.deepEqual(
+    matchingNonTransientSignatures('package.json and package-lock.json are not in sync'),
+    ['npm-lock-mismatch'],
+  );
+  assert.deepEqual(
+    matchingNonTransientSignatures('npm ci requires a lockfile for this install'),
+    ['npm-lock-mismatch'],
+  );
+  assert.deepEqual(
+    matchingNonTransientSignatures('package.json\npackage-lock.json is not in sync'),
+    [],
+  );
+  assert.deepEqual(
+    matchingTransientSignatures('TLS handshake connection timed out'),
+    ['tls-transient'],
+  );
+  assert.deepEqual(
+    matchingTransientSignatures('TLS handshake\nconnection timed out'),
+    [],
+  );
+  const large = `TLS ${'x'.repeat(250_000)} connection timeout`;
+  assert.deepEqual(matchingTransientSignatures(large), ['tls-transient']);
+});
