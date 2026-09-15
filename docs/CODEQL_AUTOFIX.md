@@ -42,8 +42,14 @@ A successful proposal becomes a draft PR with the alert/rule/base/fix provenance
 
 Those workflow results are evidence for review, not an authorization to merge. The generated PR remains draft until a human verifies the code change, the CodeQL finding, and the normal repository gates.
 
+## Unsupported Autofix rules
+
+GitHub Autofix is best-effort and does not support every CodeQL rule. A `422` response whose GitHub message explicitly states that the alert is not supported by Autofix is therefore an expected terminal result, not a controller outage. The controller records that alert as `unsupported`, performs no branch or pull-request write, and leaves the alert open for deterministic human-reviewed remediation.
+
+Only that exact unsupported-alert class is nonfatal. Other validation errors, authorization failures, unexpected `422` responses, and service/API failures remain hard controller errors.
+
 ## Failure behavior
 
-All uncertainty fails closed. API errors, unsupported Autofix results, stale alert attribution, branch collisions, oversized patches, unexpected paths, unexpected file types, and base-branch movement prevent PR creation. Existing branches are never overwritten.
+All uncertainty fails closed. API errors, stale alert attribution, branch collisions, oversized patches, unexpected paths, unexpected file types, and base-branch movement prevent PR creation. Existing branches are never overwritten. An unsupported Autofix rule also prevents PR creation, but is recorded as an auditable non-error outcome because GitHub cannot generate a fix for it.
 
 The kill switch is `enabled` in `.github/codeql-autofix.json`. The configuration, controller, self-tests, and workflow are dependency-governance manual-review paths.
