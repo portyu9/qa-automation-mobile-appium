@@ -13,6 +13,15 @@ const PAGE_SIZE = 100;
 const TERMINAL_NONBLOCKING_CONCLUSIONS = new Set(['success', 'skipped']);
 const LOG_TIMESTAMP = /^\uFEFF?(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?Z)\s/;
 
+// This is a code-level ceiling, not merely a configuration default. Expanding
+// recovery to another step requires a protected policy-code change.
+const SAFE_TRANSIENT_STEPS = new Set([
+  'Pin npm runtime',
+  'Install committed dependency graph',
+  'Pin npm runtime on Node 22',
+  'Upload framework evidence',
+]);
+
 const NON_TRANSIENT_LOG_SIGNATURES = [
   { id: 'npm-resolution', pattern: /\b(?:ERESOLVE|ELSPROBLEMS|EBADENGINE|EUSAGE)\b/iu },
   { id: 'npm-no-matching-version', pattern: /\bNo matching version found\b/iu },
@@ -50,20 +59,6 @@ const TRANSIENT_LOG_SIGNATURES = [
     id: 'tls-transient',
     pattern: /\bTLS\b.*\b(?:handshake|connection)\b.*\b(?:timeout|timed out|unexpected EOF)\b/iu,
   },
-];
-
-const NEVER_RECOVER_STEPS = [
-  'Qualify framework contracts',
-  'Bind TypeScript API surface to Node 22',
-  'Run npm run typecheck',
-  'Run npm run test',
-  'Audit committed graph',
-  'Scan dependencies, configuration, and repository secrets',
-  'Require attributed scanner evidence',
-  'Review dependency changes',
-  'Analyze',
-  'Evaluate required CI jobs',
-  'Evaluate security jobs',
 ];
 
 function unique(values) {
@@ -109,12 +104,8 @@ export function validateRecoveryConfig(config) {
   const errors = [];
   if (config?.schemaVersion !== 1) errors.push('schemaVersion must equal 1');
   if (typeof config?.enabled !== 'boolean') errors.push('enabled must be boolean');
-  if (
-    !Number.isInteger(config?.maxRunAttempts) ||
-    config.maxRunAttempts < 1 ||
-    config.maxRunAttempts > 3
-  ) {
-    errors.push('maxRunAttempts must be an integer from 1 to 3');
+  if (config?.maxRunAttempts !== 2) {
+    errors.push('maxRunAttempts must equal 2 so automatic recovery is capped at one rerun');
   }
   if (!Array.isArray(config?.transientSteps) || config.transientSteps.length === 0) {
     errors.push('transientSteps must be a non-empty array');
@@ -125,9 +116,9 @@ export function validateRecoveryConfig(config) {
     if (new Set(config.transientSteps).size !== config.transientSteps.length) {
       errors.push('transientSteps must not contain duplicates');
     }
-    for (const forbidden of NEVER_RECOVER_STEPS) {
-      if (config.transientSteps.includes(forbidden)) {
-        errors.push(`${forbidden} must never be eligible for automatic recovery`);
+    for (const step of config.transientSteps) {
+      if (!SAFE_TRANSIENT_STEPS.has(step)) {
+        errors.push(`${step} is outside the code-level Appium infrastructure recovery allowlist`);
       }
     }
   }
@@ -651,7 +642,7 @@ export async function runDependencyRecovery({
           }),
         );
       } catch (error) {
-        results.push({ pr: pull.number, error: error.message });
+        results.push({ pr: pull.number, error: error?.message || String(error) });
       }
     }
     core.info(JSON.stringify({ recovery: results }, null, 2));
