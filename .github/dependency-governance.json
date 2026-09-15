@@ -30,12 +30,16 @@
     ".github/dependabot.yml",
     ".github/workflows/security.yml",
     ".github/workflows/dependency-governance.yml",
+    ".github/workflows/codeql-autofix.yml",
     ".github/dependency-governance.json",
     ".github/dependency-recovery.json",
+    ".github/codeql-autofix.json",
     ".github/scripts/dependency-governance.mjs",
     ".github/scripts/dependency-governance.selfcheck.mjs",
     ".github/scripts/dependency-recovery-policy.mjs",
-    ".github/scripts/dependency-recovery-policy.selfcheck.mjs"
+    ".github/scripts/dependency-recovery-policy.selfcheck.mjs",
+    ".github/scripts/codeql-autofix-policy.mjs",
+    ".github/scripts/codeql-autofix-policy.selfcheck.mjs"
   ],
   "ecosystems": {
     "npm": { "files": ["package.json", "package-lock.json"] },
