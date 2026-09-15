@@ -1,0 +1,11 @@
+{
+  "schemaVersion": 1,
+  "enabled": true,
+  "maxRunAttempts": 2,
+  "transientSteps": [
+    "Pin npm runtime",
+    "Install committed dependency graph",
+    "Pin npm runtime on Node 22",
+    "Upload framework evidence"
+  ]
+}
