@@ -51,12 +51,19 @@ export function validateAutofixConfig(config) {
   ) {
     errors.push('targetAlertNumbers exceeds maxAlertsPerRun');
   }
-  if (typeof config?.branchPrefix !== 'string' || !/^security\/[a-z0-9-]+-$/u.test(config.branchPrefix)) {
+  if (
+    typeof config?.branchPrefix !== 'string' ||
+    !/^security\/[a-z0-9-]+-$/u.test(config.branchPrefix)
+  ) {
     errors.push('branchPrefix must be a bounded security/* prefix ending in a hyphen');
   }
   if (!Array.isArray(config?.allowedExtensions) || config.allowedExtensions.length === 0) {
     errors.push('allowedExtensions must be a non-empty array');
-  } else if (config.allowedExtensions.some((value) => typeof value !== 'string' || !/^\.[a-z0-9]+$/u.test(value))) {
+  } else if (
+    config.allowedExtensions.some(
+      (value) => typeof value !== 'string' || !/^\.[a-z0-9]+$/u.test(value),
+    )
+  ) {
     errors.push('allowedExtensions entries must be simple lowercase extensions');
   }
   if (!Array.isArray(config?.deniedPaths) || config.deniedPaths.length === 0) {
@@ -72,22 +79,34 @@ export function validateAutofixConfig(config) {
   }
   if (!Array.isArray(config?.qualificationWorkflows) || config.qualificationWorkflows.length === 0) {
     errors.push('qualificationWorkflows must be a non-empty array');
-  } else if (config.qualificationWorkflows.some((value) => typeof value !== 'string' || !/^[a-z0-9-]+\.ya?ml$/u.test(value))) {
+  } else if (
+    config.qualificationWorkflows.some(
+      (value) => typeof value !== 'string' || !/^[a-z0-9-]+\.ya?ml$/u.test(value),
+    )
+  ) {
     errors.push('qualificationWorkflows entries must be workflow filenames');
   }
   return unique(errors);
 }
 
 function deniedPath(filename, deniedPaths) {
-  return deniedPaths.some((entry) => (entry.endsWith('/') ? filename.startsWith(entry) : filename === entry));
+  return deniedPaths.some((entry) =>
+    entry.endsWith('/') ? filename.startsWith(entry) : filename === entry,
+  );
 }
 
 export function assessAlert(alert, config, baseSha) {
   const reasons = [];
-  if (!alert || typeof alert !== 'object') return { eligible: false, reasons: ['alert payload is missing'] };
-  if (!config.targetAlertNumbers.includes(alert.number)) reasons.push('alert number is not explicitly targeted');
+  if (!alert || typeof alert !== 'object') {
+    return { eligible: false, reasons: ['alert payload is missing'] };
+  }
+  if (!config.targetAlertNumbers.includes(alert.number)) {
+    reasons.push('alert number is not explicitly targeted');
+  }
   if (alert.state !== 'open') reasons.push(`alert state is ${alert.state || 'unknown'}, not open`);
-  if (alert.tool?.name !== config.toolName) reasons.push(`alert tool is ${alert.tool?.name || 'unknown'}, not ${config.toolName}`);
+  if (alert.tool?.name !== config.toolName) {
+    reasons.push(`alert tool is ${alert.tool?.name || 'unknown'}, not ${config.toolName}`);
+  }
   const instance = alert.most_recent_instance;
   if (!instance) reasons.push('alert has no most_recent_instance');
   if (instance?.ref !== `refs/heads/${config.defaultBranch}`) {
@@ -113,9 +132,13 @@ export function validateAutofixDiff(compare, alertAssessment, config) {
   const reasons = [];
   const files = Array.isArray(compare?.files) ? compare.files : [];
   if (files.length === 0) reasons.push('autofix produced no changed files');
-  if (files.length > config.maxChangedFiles) reasons.push(`autofix changes ${files.length} files, exceeding limit ${config.maxChangedFiles}`);
+  if (files.length > config.maxChangedFiles) {
+    reasons.push(`autofix changes ${files.length} files, exceeding limit ${config.maxChangedFiles}`);
+  }
   const changedLines = files.reduce((sum, file) => sum + Number(file.changes || 0), 0);
-  if (changedLines > config.maxChangedLines) reasons.push(`autofix changes ${changedLines} lines, exceeding limit ${config.maxChangedLines}`);
+  if (changedLines > config.maxChangedLines) {
+    reasons.push(`autofix changes ${changedLines} lines, exceeding limit ${config.maxChangedLines}`);
+  }
   const filenames = files.map((file) => file.filename);
   if (alertAssessment.locationPath && !filenames.includes(alertAssessment.locationPath)) {
     reasons.push('autofix does not modify the file that contains the targeted alert');
@@ -125,21 +148,50 @@ export function validateAutofixDiff(compare, alertAssessment, config) {
       reasons.push('autofix contains a file without a filename');
       continue;
     }
-    if (['removed', 'renamed'].includes(file.status)) reasons.push(`${file.filename} has forbidden status ${file.status}`);
-    if (deniedPath(file.filename, config.deniedPaths)) reasons.push(`${file.filename} is denied from automated autofix commits`);
+    if (['removed', 'renamed'].includes(file.status)) {
+      reasons.push(`${file.filename} has forbidden status ${file.status}`);
+    }
+    if (deniedPath(file.filename, config.deniedPaths)) {
+      reasons.push(`${file.filename} is denied from automated autofix commits`);
+    }
     const extension = path.extname(file.filename).toLowerCase();
-    if (!config.allowedExtensions.includes(extension)) reasons.push(`${file.filename} has non-allowlisted extension ${extension || '(none)'}`);
+    if (!config.allowedExtensions.includes(extension)) {
+      reasons.push(`${file.filename} has non-allowlisted extension ${extension || '(none)'}`);
+    }
   }
   if (compare?.status && !['ahead', 'identical'].includes(compare.status)) {
     reasons.push(`autofix branch compare status is ${compare.status}`);
   }
-  return { eligible: reasons.length === 0, reasons: unique(reasons), files: filenames, changedLines };
+  return {
+    eligible: reasons.length === 0,
+    reasons: unique(reasons),
+    files: filenames,
+    changedLines,
+  };
 }
 
 export function autofixBranchName(config, alertNumber, baseSha) {
-  if (!Number.isInteger(alertNumber) || alertNumber < 1) throw new Error('alert number must be a positive integer');
-  if (!/^[0-9a-f]{40}$/u.test(baseSha)) throw new Error('base SHA must be a full lowercase commit SHA');
+  if (!Number.isInteger(alertNumber) || alertNumber < 1) {
+    throw new Error('alert number must be a positive integer');
+  }
+  if (!/^[0-9a-f]{40}$/u.test(baseSha)) {
+    throw new Error('base SHA must be a full lowercase commit SHA');
+  }
   return `${config.branchPrefix}${alertNumber}-${baseSha.slice(0, 12)}`;
+}
+
+export function classifyAutofixRequestError(error) {
+  const status = Number(error?.status || 0);
+  const message = String(error?.message || '');
+  const normalized = message.toLowerCase();
+  if (status === 422 && normalized.includes('alert is not supported by autofix')) {
+    return {
+      unsupported: true,
+      status,
+      reason: 'GitHub CodeQL Autofix does not support this alert; deterministic human-reviewed remediation is required',
+    };
+  }
+  return { unsupported: false, status: status || null, reason: message || 'unknown Autofix API error' };
 }
 
 function apiHeaders() {
@@ -150,32 +202,41 @@ function apiHeaders() {
 }
 
 async function getAlert(github, owner, repo, alertNumber) {
-  const response = await github.request('GET /repos/{owner}/{repo}/code-scanning/alerts/{alert_number}', {
-    owner,
-    repo,
-    alert_number: alertNumber,
-    headers: apiHeaders(),
-  });
+  const response = await github.request(
+    'GET /repos/{owner}/{repo}/code-scanning/alerts/{alert_number}',
+    {
+      owner,
+      repo,
+      alert_number: alertNumber,
+      headers: apiHeaders(),
+    },
+  );
   return response.data;
 }
 
 async function requestAutofix(github, owner, repo, alertNumber) {
-  const response = await github.request('POST /repos/{owner}/{repo}/code-scanning/alerts/{alert_number}/autofix', {
-    owner,
-    repo,
-    alert_number: alertNumber,
-    headers: apiHeaders(),
-  });
+  const response = await github.request(
+    'POST /repos/{owner}/{repo}/code-scanning/alerts/{alert_number}/autofix',
+    {
+      owner,
+      repo,
+      alert_number: alertNumber,
+      headers: apiHeaders(),
+    },
+  );
   return response.data;
 }
 
 async function getAutofix(github, owner, repo, alertNumber) {
-  const response = await github.request('GET /repos/{owner}/{repo}/code-scanning/alerts/{alert_number}/autofix', {
-    owner,
-    repo,
-    alert_number: alertNumber,
-    headers: apiHeaders(),
-  });
+  const response = await github.request(
+    'GET /repos/{owner}/{repo}/code-scanning/alerts/{alert_number}/autofix',
+    {
+      owner,
+      repo,
+      alert_number: alertNumber,
+      headers: apiHeaders(),
+    },
+  );
   return response.data;
 }
 
@@ -217,14 +278,17 @@ async function currentBaseSha(github, owner, repo, branch) {
 }
 
 async function commitAutofix(github, owner, repo, alertNumber, branch, ruleId) {
-  const response = await github.request('POST /repos/{owner}/{repo}/code-scanning/alerts/{alert_number}/autofix/commits', {
-    owner,
-    repo,
-    alert_number: alertNumber,
-    target_ref: `refs/heads/${branch}`,
-    message: `security: apply CodeQL autofix for alert #${alertNumber}${ruleId ? ` (${ruleId})` : ''}`,
-    headers: apiHeaders(),
-  });
+  const response = await github.request(
+    'POST /repos/{owner}/{repo}/code-scanning/alerts/{alert_number}/autofix/commits',
+    {
+      owner,
+      repo,
+      alert_number: alertNumber,
+      target_ref: `refs/heads/${branch}`,
+      message: `security: apply CodeQL autofix for alert #${alertNumber}${ruleId ? ` (${ruleId})` : ''}`,
+      headers: apiHeaders(),
+    },
+  );
   return response.data;
 }
 
@@ -245,13 +309,28 @@ async function dispatchQualification(github, owner, repo, branch, workflows) {
       await github.rest.actions.createWorkflowDispatch({ owner, repo, workflow_id: workflowId, ref: branch });
       outcomes.push({ workflow: workflowId, dispatched: true });
     } catch (error) {
-      outcomes.push({ workflow: workflowId, dispatched: false, status: error?.status || null, message: error?.message || 'dispatch failed' });
+      outcomes.push({
+        workflow: workflowId,
+        dispatched: false,
+        status: error?.status || null,
+        message: error?.message || 'dispatch failed',
+      });
     }
   }
   return outcomes;
 }
 
-async function createDraftPull(github, owner, repo, branch, alert, assessment, baseSha, fixSha, validation) {
+async function createDraftPull(
+  github,
+  owner,
+  repo,
+  branch,
+  alert,
+  assessment,
+  baseSha,
+  fixSha,
+  validation,
+) {
   const marker = `<!-- codeql-autofix:alert-${alert.number}:${baseSha} -->`;
   const body = [
     marker,
@@ -287,7 +366,9 @@ export async function runCodeqlAutofix({
 }) {
   const config = loadJson(configPath);
   const configErrors = validateAutofixConfig(config);
-  if (configErrors.length > 0) throw new Error(`Invalid CodeQL autofix config:\n- ${configErrors.join('\n- ')}`);
+  if (configErrors.length > 0) {
+    throw new Error(`Invalid CodeQL autofix config:\n- ${configErrors.join('\n- ')}`);
+  }
   if (!config.enabled) {
     core.info('CodeQL autofix kill switch is disabled.');
     return [];
@@ -297,8 +378,15 @@ export async function runCodeqlAutofix({
   const baseSha = await currentBaseSha(github, owner, repo, config.defaultBranch);
   if (context.eventName === 'workflow_run') {
     const run = context.payload.workflow_run;
-    if (run?.name !== 'security' || run?.conclusion !== 'success' || run?.head_branch !== config.defaultBranch || run?.head_sha !== baseSha) {
-      core.info('Ignoring workflow_run because it is not a successful security run for the exact current default-branch head.');
+    if (
+      run?.name !== 'security' ||
+      run?.conclusion !== 'success' ||
+      run?.head_branch !== config.defaultBranch ||
+      run?.head_sha !== baseSha
+    ) {
+      core.info(
+        'Ignoring workflow_run because it is not a successful security run for the exact current default-branch head.',
+      );
       return [];
     }
   } else if (context.eventName === 'workflow_dispatch') {
@@ -338,14 +426,29 @@ export async function runCodeqlAutofix({
         continue;
       }
 
-      const initialAutofix = await requestAutofix(github, owner, repo, alertNumber);
-      const autofix = initialAutofix?.status === 'success'
-        ? initialAutofix
-        : await waitForAutofix(github, owner, repo, alertNumber, config);
+      let initialAutofix;
+      try {
+        initialAutofix = await requestAutofix(github, owner, repo, alertNumber);
+      } catch (error) {
+        const classification = classifyAutofixRequestError(error);
+        if (!classification.unsupported) throw error;
+        result.state = 'unsupported';
+        result.status = classification.status;
+        result.reasons = [classification.reason];
+        results.push(result);
+        continue;
+      }
+
+      const autofix =
+        initialAutofix?.status === 'success'
+          ? initialAutofix
+          : await waitForAutofix(github, owner, repo, alertNumber, config);
       result.autofixStatus = autofix?.status || 'unknown';
       if (autofix?.status !== 'success') {
         result.state = 'skipped';
-        result.reasons = [`GitHub Autofix did not reach success: ${autofix?.status || 'unknown'}`];
+        result.reasons = [
+          `GitHub Autofix did not reach success: ${autofix?.status || 'unknown'}`,
+        ];
         results.push(result);
         continue;
       }
@@ -368,7 +471,14 @@ export async function runCodeqlAutofix({
         continue;
       }
 
-      const commit = await commitAutofix(github, owner, repo, alertNumber, branch, assessment.ruleId);
+      const commit = await commitAutofix(
+        github,
+        owner,
+        repo,
+        alertNumber,
+        branch,
+        assessment.ruleId,
+      );
       const fixSha = commit?.sha;
       if (typeof fixSha !== 'string' || !/^[0-9a-f]{40}$/u.test(fixSha)) {
         await deleteOwnedRef(github, owner, repo, branch);
@@ -396,9 +506,25 @@ export async function runCodeqlAutofix({
         continue;
       }
 
-      const pull = await createDraftPull(github, owner, repo, branch, alert, assessment, baseSha, fixSha, validation);
+      const pull = await createDraftPull(
+        github,
+        owner,
+        repo,
+        branch,
+        alert,
+        assessment,
+        baseSha,
+        fixSha,
+        validation,
+      );
       result.pullRequest = pull.number;
-      result.qualification = await dispatchQualification(github, owner, repo, branch, config.qualificationWorkflows);
+      result.qualification = await dispatchQualification(
+        github,
+        owner,
+        repo,
+        branch,
+        config.qualificationWorkflows,
+      );
       result.state = 'draft-pr-created';
       results.push(result);
     } catch (error) {
