@@ -198,27 +198,25 @@ test('recovery config is bounded and Mobile infrastructure-only', () => {
     'Pin npm runtime on Node 22',
     'Upload framework evidence',
   ]);
-  for (const forbidden of [
-    'Qualify framework contracts',
-    'Bind TypeScript API surface to Node 22',
-    'Run npm run typecheck',
-    'Run npm run test',
-    'Audit committed graph',
-    'Scan dependencies, configuration, and repository secrets',
-    'Require attributed scanner evidence',
-    'Review dependency changes',
-    'Analyze',
-    'Evaluate required CI jobs',
-    'Evaluate security jobs',
-  ]) {
-    assert.equal(recoveryConfig.transientSteps.includes(forbidden), false, forbidden);
+  for (const invalidAttempts of [1, 3, 4]) {
+    assert.ok(
+      validateRecoveryConfig({ ...recoveryConfig, maxRunAttempts: invalidAttempts }).length > 0,
+      `maxRunAttempts=${invalidAttempts} must fail closed`,
+    );
   }
-  assert.ok(validateRecoveryConfig({ ...recoveryConfig, maxRunAttempts: 4 }).length > 0);
+  assert.ok(
+    validateRecoveryConfig({
+      ...recoveryConfig,
+      transientSteps: [...recoveryConfig.transientSteps, 'Future network bootstrap'],
+    }).length > 0,
+    'unknown step names must require a protected policy-code change',
+  );
   assert.ok(
     validateRecoveryConfig({
       ...recoveryConfig,
       transientSteps: [...recoveryConfig.transientSteps, 'Qualify framework contracts'],
     }).length > 0,
+    'known deterministic steps must remain outside the code-level allowlist',
   );
 });
 
