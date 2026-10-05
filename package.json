@@ -23,7 +23,7 @@
     "device:smoke": "npm run build && node dist/tests/device/smoke.device.js"
   },
   "dependencies": {
-    "webdriverio": "9.31.5"
+    "webdriverio": "9.32.0"
   },
   "devDependencies": {
     "@types/node": "24.13.3",
