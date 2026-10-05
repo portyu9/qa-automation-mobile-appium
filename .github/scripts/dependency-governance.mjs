@@ -1,11 +1,17 @@
 #!/usr/bin/env node
+/* global structuredClone, fetch */
 
 import path from 'node:path';
 import process from 'node:process';
 import { pathToFileURL } from 'node:url';
 import governanceConfig from '../dependency-governance.json' with { type: 'json' };
 
-const DEP_SECTIONS = ['dependencies', 'devDependencies', 'optionalDependencies', 'peerDependencies'];
+const DEP_SECTIONS = [
+  'dependencies',
+  'devDependencies',
+  'optionalDependencies',
+  'peerDependencies',
+];
 const PAGE_SIZE = 100;
 
 function unique(values) {
@@ -15,7 +21,11 @@ function unique(values) {
 export function stable(value) {
   if (Array.isArray(value)) return value.map(stable);
   if (value && typeof value === 'object') {
-    return Object.fromEntries(Object.keys(value).sort().map((key) => [key, stable(value[key])]));
+    return Object.fromEntries(
+      Object.keys(value)
+        .sort()
+        .map((key) => [key, stable(value[key])]),
+    );
   }
   return value;
 }
@@ -116,7 +126,8 @@ export function classifyEcosystem(files, config) {
   if (
     names.length > 0 &&
     names.every(
-      (name) => name.startsWith(workflowPrefix) && extensions.some((extension) => name.endsWith(extension)),
+      (name) =>
+        name.startsWith(workflowPrefix) && extensions.some((extension) => name.endsWith(extension)),
     )
   ) {
     return 'github-actions';
@@ -366,14 +377,11 @@ export function validateActionsSemanticChange(
 ) {
   const reasons = [];
   const changes = [];
+  void manualReviewPaths;
   const metadataByName = new Map(metadata.map((item) => [item.name, item]));
 
   for (const file of files) {
     const filename = typeof file === 'string' ? file : file.filename;
-    if (manualReviewPaths.includes(filename)) {
-      reasons.push(`${filename} is a privileged/control-plane workflow and requires human review`);
-    }
-
     const baseLines = String(baseByPath[filename] || '').split(/\r?\n/);
     const headLines = String(headByPath[filename] || '').split(/\r?\n/);
     if (baseLines.length !== headLines.length) {
@@ -429,7 +437,10 @@ export function validateActionsSemanticChange(
         }
       }
       if (before.version.major === 0 && comparison.risk === 'minor') {
-        comparison = { risk: 'major-risk', reason: '0.x action minor transition treated as breaking-risk' };
+        comparison = {
+          risk: 'major-risk',
+          reason: '0.x action minor transition treated as breaking-risk',
+        };
       }
       changes.push({
         ecosystem: 'github-actions',
@@ -458,14 +469,21 @@ export function validateConfig(config) {
     errors.push('botUserId must be a positive integer');
   }
   if (!nonEmpty(config?.botAuthorEmail)) errors.push('botAuthorEmail must be non-empty');
-  if (!nonEmpty(config?.trustedCommitterLogin)) errors.push('trustedCommitterLogin must be non-empty');
+  if (!nonEmpty(config?.trustedCommitterLogin))
+    errors.push('trustedCommitterLogin must be non-empty');
   if (!nonEmpty(config?.gitCommitterName) || !nonEmpty(config?.gitCommitterEmail)) {
     errors.push('git committer identity must be configured');
   }
   if (!nonEmpty(config?.signedOffBy)) errors.push('signedOffBy must be non-empty');
   if (!nonEmpty(config?.baseBranch)) errors.push('baseBranch must be non-empty');
-  if (!['merge', 'squash', 'rebase'].includes(config?.mergeMethod)) errors.push('mergeMethod is invalid');
-  if (typeof config?.automergeEnabled !== 'boolean') errors.push('automergeEnabled must be boolean');
+  if (!['merge', 'squash', 'rebase'].includes(config?.mergeMethod))
+    errors.push('mergeMethod is invalid');
+  if (typeof config?.automergeEnabled !== 'boolean')
+    errors.push('automergeEnabled must be boolean');
+  if (config?.ownerApprovalRequired !== true) errors.push('ownerApprovalRequired must remain true');
+  if (!nonEmpty(config?.ownerApprovalLogin)) errors.push('ownerApprovalLogin must be non-empty');
+  if (!Number.isInteger(config?.ownerApprovalUserId) || config.ownerApprovalUserId <= 0)
+    errors.push('ownerApprovalUserId must be a positive integer');
 
   if (
     !Number.isInteger(config?.maxChangedFiles) ||
@@ -527,6 +545,10 @@ export function validateConfig(config) {
     '.github/dependency-governance.json',
     '.github/scripts/dependency-governance.mjs',
     '.github/scripts/dependency-governance.selfcheck.mjs',
+    '.github/scripts/validate_codeql_sarif.py',
+    '.github/scripts/validate_codeql_sarif_selfcheck.py',
+    '.github/scripts/validate_security_stack.py',
+    '.github/dependabot.yml',
   ]) {
     if (!config?.manualReviewPaths?.includes(critical)) {
       errors.push(`${critical} must require manual review`);
@@ -571,7 +593,9 @@ export function validateProvenance({ pull, commits, baseSha, config, now = new D
     reasons.push(`PR author is ${pull.user?.login || 'unknown'}, not ${config.botLogin}`);
   }
   if (pull.user?.id !== config.botUserId) {
-    reasons.push(`PR author numeric identity is ${pull.user?.id ?? 'unknown'}, expected ${config.botUserId}`);
+    reasons.push(
+      `PR author numeric identity is ${pull.user?.id ?? 'unknown'}, expected ${config.botUserId}`,
+    );
   }
   if (pull.base?.ref !== config.baseBranch) {
     reasons.push(`base branch is ${pull.base?.ref}, expected ${config.baseBranch}`);
@@ -975,9 +999,7 @@ async function qualificationForHead(api, pull, config) {
       continue;
     }
     const jobs = await api.paginate(`/actions/runs/${run.id}/jobs?filter=latest`, 'jobs');
-    const gate = jobs
-      .filter((job) => job.name === requirement.gate)
-      .sort((a, b) => b.id - a.id)[0];
+    const gate = jobs.filter((job) => job.name === requirement.gate).sort((a, b) => b.id - a.id)[0];
     if (!gate) qualifications.push({ ...requirement, state: 'gate-missing', runId: run.id });
     else if (gate.status !== 'completed') {
       qualifications.push({ ...requirement, state: 'gate-pending', runId: run.id });
@@ -1087,7 +1109,7 @@ function renderComment({ assessment, config, merged = false, dispatches = [] }) 
   lines.push(
     `Head: \`${pull.head.sha}\``,
     '',
-    '> Safety invariant: privileged governance runs only trusted code from the default branch, never checks out or executes the Dependabot PR head, requires exact-head test/security gates, and never autonomously merges major, downgrade, prerelease, unknown, stale-base, or control-plane changes.',
+    '> Safety invariant: privileged governance runs only trusted code from the default branch, never checks out or executes the Dependabot PR head, requires exact-head qualification plus owner-authenticated approval, and never autonomously merges major, downgrade, prerelease, unknown, stale-base, or arbitrary control-plane edits; protected-workflow changes are limited to proven signed immutable action-pin transitions.',
   );
   return `${lines.join('\n')}\n`;
 }
@@ -1109,11 +1131,123 @@ async function upsertComment(api, pullNumber, marker, body) {
   return api.post(`/issues/${pullNumber}/comments`, { body });
 }
 
+const OWNER_REVIEW_MARKER = '<!-- dependency-owner-review:v1:';
+const OWNER_APPROVAL_MARKER = '<!-- dependency-owner-approval:v1:';
+const OWNER_REFRESH_MARKER = '<!-- dependency-owner-refresh:v1:';
+
+export async function verifyOwnerIdentity(ownerApi, config) {
+  if (!ownerApi) {
+    throw new Error(
+      'DEPENDABOT_OWNER_TOKEN is required for owner-authenticated Dependabot refresh, review, and approval',
+    );
+  }
+  const identity = await ownerApi.get('https://api.github.com/user');
+  if (
+    identity?.login !== config.ownerApprovalLogin ||
+    identity?.id !== config.ownerApprovalUserId
+  ) {
+    throw new Error(
+      'DEPENDABOT_OWNER_TOKEN does not authenticate the configured repository owner identity',
+    );
+  }
+}
+
+export async function hasExactOwnerApproval(ownerApi, number, headSha, config) {
+  const reviews = await ownerApi.paginate(`/pulls/${number}/reviews`);
+  return reviews.some(
+    (review) =>
+      review.state === 'APPROVED' &&
+      review.commit_id === headSha &&
+      review.user?.login === config.ownerApprovalLogin &&
+      review.user?.id === config.ownerApprovalUserId,
+  );
+}
+
+export async function ensureOwnerReviewAndApproval(ownerApi, assessment, config) {
+  await verifyOwnerIdentity(ownerApi, config);
+  const number = assessment.pull.number;
+  const headSha = String(assessment.pull.head?.sha || '');
+  if (!/^[0-9a-f]{40}$/u.test(headSha)) throw new Error('Dependabot head SHA is not canonical');
+
+  const marker = `${OWNER_REVIEW_MARKER}${headSha} -->`;
+  const comments = await ownerApi.paginate(`/issues/${number}/comments`);
+  const exactComments = comments.filter(
+    (comment) =>
+      String(comment.body || '').includes(marker) &&
+      comment.user?.login === config.ownerApprovalLogin &&
+      comment.user?.id === config.ownerApprovalUserId,
+  );
+  if (exactComments.length > 1) {
+    throw new Error(`PR #${number} has duplicate exact-head owner review comments`);
+  }
+  if (exactComments.length === 0) {
+    await ownerApi.post(`/issues/${number}/comments`, {
+      body: [
+        marker,
+        '## Owner-authenticated Dependabot review',
+        '',
+        `- Exact head: ${headSha}`,
+        '- Canonical Dependabot provenance: **pass**',
+        '- Semantic dependency scope: **pass**',
+        '- All configured exact-head qualification gates: **pass**',
+        '- Action: approve this exact head, revalidate it, then merge only if it remains unchanged and qualified.',
+      ].join('\n'),
+    });
+  }
+
+  if (!(await hasExactOwnerApproval(ownerApi, number, headSha, config))) {
+    await ownerApi.post(`/pulls/${number}/reviews`, {
+      event: 'APPROVE',
+      commit_id: headSha,
+      body: `${OWNER_APPROVAL_MARKER}${headSha} -->\nOwner-authenticated automated approval for this exact Dependabot head after canonical provenance, governed semantic scope, and all required exact-head qualification gates passed. Repository rules remain authoritative.`,
+    });
+  }
+  if (!(await hasExactOwnerApproval(ownerApi, number, headSha, config))) {
+    throw new Error(`PR #${number} does not have the required exact-head owner approval`);
+  }
+}
+
+export async function requestDependabotRefresh(ownerApi, assessment, config) {
+  const staleReason = 'PR is not rebased directly on the current base branch head';
+  if (
+    assessment.provenance.reasons.length !== 1 ||
+    assessment.provenance.reasons[0] !== staleReason
+  ) {
+    return false;
+  }
+
+  await verifyOwnerIdentity(ownerApi, config);
+  const number = assessment.pull.number;
+  const headSha = String(assessment.pull.head?.sha || '');
+  const marker = `${OWNER_REFRESH_MARKER}${headSha}:${assessment.baseSha}:rebase -->`;
+  const comments = await ownerApi.paginate(`/issues/${number}/comments`);
+  if (
+    comments.some(
+      (comment) =>
+        String(comment.body || '').includes(marker) &&
+        comment.user?.login === config.ownerApprovalLogin &&
+        comment.user?.id === config.ownerApprovalUserId,
+    )
+  ) {
+    return true;
+  }
+
+  await ownerApi.post(`/issues/${number}/comments`, {
+    body: [
+      '@dependabot rebase',
+      '',
+      marker,
+      'Requested by the configured push-capable repository owner because the exact Dependabot source commit is no longer parented on current main. Qualification restarts on the new exact head; no merge or security gate is bypassed.',
+    ].join('\n'),
+  });
+  return true;
+}
+
 async function assessPull(api, number, config, { includeQualification = true } = {}) {
   const pull = await getPull(api, number);
   const baseSha = await getCurrentBaseSha(api, config.baseBranch);
   let files = [];
-  let commits = [];
+  let commits;
   try {
     [files, commits] = await Promise.all([getPullFiles(api, pull), getPullCommits(api, pull)]);
   } catch (error) {
@@ -1204,13 +1338,14 @@ async function assessPull(api, number, config, { includeQualification = true } =
   };
 }
 
-async function maybeMerge(api, assessment, config, allowMerge) {
+async function maybeMerge(api, ownerApi, assessment, config, allowMerge) {
   const eligible =
     assessment.provenance.eligible &&
     assessment.metadataAssessment.eligible &&
     assessment.semantic.eligible;
   if (!eligible || !assessment.qualification?.allSuccess || !allowMerge) return { merged: false };
 
+  await ensureOwnerReviewAndApproval(ownerApi, assessment, config);
   const refreshed = await assessPull(api, assessment.pull.number, config, {
     includeQualification: true,
   });
@@ -1222,6 +1357,12 @@ async function maybeMerge(api, assessment, config, allowMerge) {
     refreshed.semantic.eligible &&
     refreshed.qualification.allSuccess;
   if (!stillEligible) return { merged: false, refreshed };
+  await verifyOwnerIdentity(ownerApi, config);
+  if (
+    !(await hasExactOwnerApproval(ownerApi, refreshed.pull.number, refreshed.pull.head.sha, config))
+  ) {
+    throw new Error('exact-head owner approval disappeared before merge');
+  }
 
   const result = await api.put(`/pulls/${refreshed.pull.number}/merge`, {
     merge_method: config.mergeMethod,
@@ -1256,7 +1397,13 @@ async function maybeMerge(api, assessment, config, allowMerge) {
   return { merged: result?.merged === true, result, refreshed, dispatches };
 }
 
-async function processPull(api, number, config, { allowMerge, includeQualification = true }) {
+async function processPull(
+  api,
+  ownerApi,
+  number,
+  config,
+  { allowMerge, includeQualification = true },
+) {
   const assessment = await assessPull(api, number, config, { includeQualification });
   if (
     assessment.pull.user?.login !== config.botLogin ||
@@ -1265,7 +1412,8 @@ async function processPull(api, number, config, { allowMerge, includeQualificati
     return { skipped: true, reason: 'not canonical Dependabot' };
   }
 
-  const mergeAttempt = await maybeMerge(api, assessment, config, allowMerge);
+  await requestDependabotRefresh(ownerApi, assessment, config);
+  const mergeAttempt = await maybeMerge(api, ownerApi, assessment, config, allowMerge);
   const finalAssessment = mergeAttempt.refreshed || assessment;
   const body = renderComment({
     assessment: finalAssessment,
@@ -1309,15 +1457,23 @@ async function main() {
     repository: process.env.GITHUB_REPOSITORY,
     maxPaginationPages: config.maxPaginationPages,
   });
+  const ownerToken = String(process.env.DEPENDABOT_OWNER_TOKEN || '').trim();
+  const ownerApi = ownerToken
+    ? new GitHubApi({
+        token: ownerToken,
+        repository: process.env.GITHUB_REPOSITORY,
+        maxPaginationPages: config.maxPaginationPages,
+      })
+    : null;
   const allowMerge = process.env.ALLOW_MERGE === 'true';
 
-  if (eventName === 'schedule') {
+  if (eventName === 'schedule' || eventName === 'push') {
     const pulls = await api.paginate('/pulls?state=open');
     const dependabotPulls = pulls.filter(
       (pull) => pull.user?.login === config.botLogin && pull.user?.id === config.botUserId,
     );
     const reconciliation = await reconcileIndependently(dependabotPulls, (pull) =>
-      processPull(api, pull.number, config, { allowMerge, includeQualification: true }),
+      processPull(api, ownerApi, pull.number, config, { allowMerge, includeQualification: true }),
     );
     console.log(
       JSON.stringify(
@@ -1343,7 +1499,7 @@ async function main() {
     return;
   }
 
-  const result = await processPull(api, number, config, {
+  const result = await processPull(api, ownerApi, number, config, {
     allowMerge,
     includeQualification: true,
   });

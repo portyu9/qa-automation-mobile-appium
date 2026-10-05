@@ -14,11 +14,26 @@
   "maxChangedFiles": 25,
   "maxPullRequestAgeDays": 14,
   "maxPaginationPages": 10,
-  "manualReviewLabels": ["manual-review", "do-not-merge"],
+  "manualReviewLabels": [
+    "manual-review",
+    "do-not-merge"
+  ],
   "requiredWorkflows": [
-    { "workflow": "ci", "gate": "ci-gate", "file": "ci.yml" },
-    { "workflow": "security", "gate": "security-gate", "file": "security.yml" },
-    { "workflow": "docs", "gate": "docs-contract", "file": "docs.yml" }
+    {
+      "workflow": "ci",
+      "gate": "ci-gate",
+      "file": "ci.yml"
+    },
+    {
+      "workflow": "security",
+      "gate": "security-gate",
+      "file": "security.yml"
+    },
+    {
+      "workflow": "docs",
+      "gate": "docs-contract",
+      "file": "docs.yml"
+    }
   ],
   "allowedUpdateTypes": [
     "version-update:semver-patch",
@@ -39,14 +54,35 @@
     ".github/scripts/dependency-recovery-policy.mjs",
     ".github/scripts/dependency-recovery-policy.selfcheck.mjs",
     ".github/scripts/codeql-autofix-policy.mjs",
-    ".github/scripts/codeql-autofix-policy.selfcheck.mjs"
+    ".github/scripts/codeql-autofix-policy.selfcheck.mjs",
+    ".github/scripts/validate_codeql_sarif.py",
+    ".github/scripts/validate_codeql_sarif_selfcheck.py",
+    ".github/scripts/validate_security_stack.py"
   ],
   "ecosystems": {
-    "npm": { "files": ["package.json", "package-lock.json"] },
-    "docker": { "files": ["Dockerfile"], "allowedImages": ["node"] },
+    "npm": {
+      "files": [
+        "package.json",
+        "package-lock.json"
+      ]
+    },
+    "docker": {
+      "files": [
+        "Dockerfile"
+      ],
+      "allowedImages": [
+        "node"
+      ]
+    },
     "github-actions": {
       "workflowPrefix": ".github/workflows/",
-      "extensions": [".yml", ".yaml"]
+      "extensions": [
+        ".yml",
+        ".yaml"
+      ]
     }
-  }
+  },
+  "ownerApprovalRequired": true,
+  "ownerApprovalLogin": "portyu9",
+  "ownerApprovalUserId": 35150859
 }
