@@ -25,15 +25,8 @@ export function validateAutofixConfig(config) {
   if (typeof config?.enabled !== 'boolean') errors.push('enabled must be boolean');
   if (config?.defaultBranch !== 'main') errors.push('defaultBranch must equal main');
   if (config?.toolName !== 'CodeQL') errors.push('toolName must equal CodeQL');
-  if (!Array.isArray(config?.targetAlertNumbers) || config.targetAlertNumbers.length === 0) {
-    errors.push('targetAlertNumbers must be a non-empty array');
-  } else {
-    if (config.targetAlertNumbers.some((value) => !Number.isInteger(value) || value < 1)) {
-      errors.push('targetAlertNumbers must contain positive integers only');
-    }
-    if (new Set(config.targetAlertNumbers).size !== config.targetAlertNumbers.length) {
-      errors.push('targetAlertNumbers must not contain duplicates');
-    }
+  if (Object.hasOwn(config ?? {}, 'targetAlertNumbers')) {
+    errors.push('targetAlertNumbers must not be configured; discover from GitHub at runtime');
   }
   for (const error of [
     positiveInteger(config?.maxAlertsPerRun, 'maxAlertsPerRun', 1, 10),
@@ -43,13 +36,6 @@ export function validateAutofixConfig(config) {
     positiveInteger(config?.pollIntervalSeconds, 'pollIntervalSeconds', 1, 30),
   ]) {
     if (error) errors.push(error);
-  }
-  if (
-    Array.isArray(config?.targetAlertNumbers) &&
-    Number.isInteger(config?.maxAlertsPerRun) &&
-    config.targetAlertNumbers.length > config.maxAlertsPerRun
-  ) {
-    errors.push('targetAlertNumbers exceeds maxAlertsPerRun');
   }
   if (
     typeof config?.branchPrefix !== 'string' ||
@@ -95,13 +81,42 @@ function deniedPath(filename, deniedPaths) {
   );
 }
 
+
+// Select only active, authenticated CodeQL findings; numbers are never persisted.
+export function selectOpenCodeqlTargets(alerts, config) {
+  if (!Array.isArray(alerts)) throw new Error('CodeQL open-alert inventory is malformed');
+  if (alerts.length >= 100) {
+    throw new Error('CodeQL open-alert inventory may be truncated; refusing ambiguous discovery');
+  }
+  if (Object.hasOwn(config ?? {}, 'targetAlertNumbers') ||
+      !Number.isInteger(config?.maxAlertsPerRun) || config.maxAlertsPerRun < 1 || config.maxAlertsPerRun > 10) {
+    throw new Error('CodeQL discovery received invalid or pinned policy');
+  }
+  const seen = new Set();
+  for (const alert of alerts) {
+    if (!Number.isInteger(alert?.number) || alert.number < 1 || seen.has(alert.number)) {
+      throw new Error('CodeQL inventory has missing, invalid, or duplicate alert identity');
+    }
+    if (alert.state !== 'open' || alert.tool?.name !== config.toolName) {
+      throw new Error('CodeQL inventory contains an unexpected alert state or tool');
+    }
+    seen.add(alert.number);
+  }
+  const ordered = [...seen].sort((a, b) => a - b);
+  return {
+    state: ordered.length ? 'targets' : 'empty',
+    targets: ordered.slice(0, config.maxAlertsPerRun),
+    queued: Math.max(0, ordered.length - config.maxAlertsPerRun),
+  };
+}
+
 export function assessAlert(alert, config, baseSha) {
   const reasons = [];
   if (!alert || typeof alert !== 'object') {
     return { eligible: false, reasons: ['alert payload is missing'] };
   }
-  if (!config.targetAlertNumbers.includes(alert.number)) {
-    reasons.push('alert number is not explicitly targeted');
+  if (!Number.isInteger(alert.number) || alert.number < 1) {
+    reasons.push('alert number is not a positive integer');
   }
   if (alert.state !== 'open') reasons.push(`alert state is ${alert.state || 'unknown'}, not open`);
   if (alert.tool?.name !== config.toolName) {
@@ -398,8 +413,19 @@ export async function runCodeqlAutofix({
     return [];
   }
 
+  // A successful empty inventory is an ordinary no-op. API/authorization errors,
+  // malformed responses and ambiguous pagination are fatal, not false green.
+  const inventory = await github.rest.codeScanning.listAlertsForRepo({
+    owner, repo, state: 'open', tool_name: config.toolName, per_page: 100, page: 1,
+  });
+  const discovered = selectOpenCodeqlTargets(inventory.data, config);
+  if (discovered.state === 'empty') {
+    core.info('CodeQL: authenticated open-alert inventory is empty; nothing to remediate.');
+    return [];
+  }
+  core.info(`CodeQL: selecting ${discovered.targets.length} live alerts; ${discovered.queued} queued for a later run.`);
   const results = [];
-  for (const alertNumber of config.targetAlertNumbers.slice(0, config.maxAlertsPerRun)) {
+  for (const alertNumber of discovered.targets) {
     const result = { alertNumber, baseSha };
     try {
       const alert = await getAlert(github, owner, repo, alertNumber);
