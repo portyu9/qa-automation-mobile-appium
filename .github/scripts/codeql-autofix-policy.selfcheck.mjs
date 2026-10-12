@@ -6,6 +6,7 @@ import {
   autofixBranchName,
   classifyAutofixRequestError,
   validateAutofixConfig,
+  selectOpenCodeqlTargets,
   validateAutofixDiff,
 } from './codeql-autofix-policy.mjs';
 
@@ -33,7 +34,7 @@ function compare(files) {
 
 test('production autofix config is valid and bounded', () => {
   assert.deepEqual(validateAutofixConfig(config), []);
-  assert.deepEqual(config.targetAlertNumbers, [1, 2]);
+  assert.equal(Object.hasOwn(config, 'targetAlertNumbers'), false);
   assert.equal(config.maxAlertsPerRun, 2);
   assert.ok(config.maxChangedFiles <= 4);
   assert.ok(config.maxChangedLines <= 200);
@@ -45,7 +46,7 @@ test('config rejects unbounded or weakened safety controls', () => {
   assert.ok(validateAutofixConfig({ ...config, maxAlertsPerRun: 11 }).length > 0);
   assert.ok(validateAutofixConfig({ ...config, maxChangedFiles: 11 }).length > 0);
   assert.ok(validateAutofixConfig({ ...config, maxChangedLines: 501 }).length > 0);
-  assert.ok(validateAutofixConfig({ ...config, targetAlertNumbers: [] }).length > 0);
+  assert.ok(validateAutofixConfig({ ...config, targetAlertNumbers: [1] }).length > 0);
   assert.ok(validateAutofixConfig({ ...config, branchPrefix: 'feature/autofix-' }).length > 0);
   assert.ok(
     validateAutofixConfig({
@@ -55,11 +56,35 @@ test('config rejects unbounded or weakened safety controls', () => {
   );
 });
 
+test('authenticated zero-alert inventory is an explicit no-op', () => {
+  assert.deepEqual(selectOpenCodeqlTargets([], config), { state: 'empty', targets: [], queued: 0 });
+});
+
+test('current open alert numbers are discovered, sorted, and bounded dynamically', () => {
+  const open = (number) => ({ number, state: 'open', tool: { name: 'CodeQL' } });
+  assert.deepEqual(selectOpenCodeqlTargets([open(82)], config), {
+    state: 'targets', targets: [82], queued: 0,
+  });
+  assert.deepEqual(selectOpenCodeqlTargets([open(71), open(82), open(36)], config), {
+    state: 'targets', targets: [36, 71], queued: 1,
+  });
+});
+
+test('truncated, malformed or pinned alert inventories cannot be interpreted as clean', () => {
+  const open = (number) => ({ number, state: 'open', tool: { name: 'CodeQL' } });
+  for (const inventory of [
+    null, {}, [open(3), open(3)], [open(0)], [{ number: 3, state: 'fixed', tool: { name: 'CodeQL' } }],
+    [{ number: 3, state: 'open', tool: { name: 'Other' } }],
+    Array.from({ length: 100 }, (_, i) => open(i + 1)),
+  ]) assert.throws(() => selectOpenCodeqlTargets(inventory, config));
+  assert.throws(() => selectOpenCodeqlTargets([open(7)], { ...config, targetAlertNumbers: [7] }));
+});
+
 test('only exact-current-main open CodeQL alerts are eligible', () => {
   assert.equal(assessAlert(alert(), config, BASE).eligible, true);
   assert.equal(assessAlert(alert({ state: 'fixed' }), config, BASE).eligible, false);
   assert.equal(assessAlert(alert({ tool: { name: 'ESLint' } }), config, BASE).eligible, false);
-  assert.equal(assessAlert(alert({ number: 999 }), config, BASE).eligible, false);
+  assert.equal(assessAlert(alert({ number: 0 }), config, BASE).eligible, false);
   assert.equal(
     assessAlert(
       alert({
