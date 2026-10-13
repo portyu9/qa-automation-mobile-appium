@@ -116,6 +116,33 @@ test('npm patch dependency-only update is eligible', () => {
   assert.equal(result.changes[0].risk, 'patch');
 });
 
+test('npm lockfile root override omission is safe only when manifest overrides remain authoritative', () => {
+  const f = npmFixture();
+  f.basePackage.overrides = { 'proxy-addr': '2.0.8' };
+  f.headPackage.overrides = structuredClone(f.basePackage.overrides);
+  f.baseLock.packages[''].overrides = structuredClone(f.basePackage.overrides);
+  // npm may omit the root override mirror on a Dependabot-generated lockfile.
+  const valid = validateNpmSemanticChange(
+    f.basePackage, f.headPackage, f.baseLock, f.headLock, meta('express'),
+  );
+  assert.equal(valid.eligible, true, valid.reasons.join('; '));
+
+  f.headLock.packages[''].overrides = { 'proxy-addr': '3.0.0' };
+  const conflict = validateNpmSemanticChange(
+    f.basePackage, f.headPackage, f.baseLock, f.headLock, meta('express'),
+  );
+  assert.equal(conflict.eligible, false);
+  assert.match(conflict.reasons.join('\\n'), /root overrides conflict/);
+
+  f.headLock.packages[''].overrides = structuredClone(f.basePackage.overrides);
+  f.headPackage.overrides = { 'proxy-addr': '3.0.0' };
+  const modifiedManifest = validateNpmSemanticChange(
+    f.basePackage, f.headPackage, f.baseLock, f.headLock, meta('express'),
+  );
+  assert.equal(modifiedManifest.eligible, false);
+  assert.match(modifiedManifest.reasons.join('\\n'), /outside dependency declarations/);
+});
+
 test('npm major, scripts mutation, and newly introduced install script are blocked', () => {
   const major = npmFixture('^1.2.3', '^2.0.0');
   assert.equal(
