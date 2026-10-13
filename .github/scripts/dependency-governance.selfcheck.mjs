@@ -143,6 +143,35 @@ test('npm lockfile root override omission is safe only when manifest overrides r
   assert.match(modifiedManifest.reasons.join('\\n'), /outside dependency declarations/);
 });
 
+test('signed major npm upgrade is eligible only with exact version, unchanged contracts, and green qualification', () => {
+  const f = npmFixture('^9.32.0', '^10.0.2');
+  const signed = [{ name: 'express', version: '10.0.2', updateType: 'version-update:semver-major' }];
+  const valid = validateNpmSemanticChange(
+    f.basePackage, f.headPackage, f.baseLock, f.headLock, signed,
+  );
+  assert.equal(valid.eligible, true, valid.reasons.join('; '));
+  assert.equal(valid.changes[0].risk, 'major');
+
+  const spoofed = validateNpmSemanticChange(
+    f.basePackage, f.headPackage, f.baseLock, f.headLock,
+    [{ ...signed[0], version: '11.0.0' }],
+  );
+  assert.equal(spoofed.eligible, false);
+  assert.match(spoofed.reasons.join('; '), /signed version differs/);
+
+  const misclassified = validateNpmSemanticChange(
+    f.basePackage, f.headPackage, f.baseLock, f.headLock,
+    [{ ...signed[0], updateType: 'version-update:semver-minor' }],
+  );
+  assert.equal(misclassified.eligible, false);
+  assert.match(misclassified.reasons.join('; '), /signed update type differs/);
+
+  f.headPackage.scripts = { test: 'unexpected command' };
+  assert.equal(validateNpmSemanticChange(
+    f.basePackage, f.headPackage, f.baseLock, f.headLock, signed,
+  ).eligible, false);
+});
+
 test('npm major, scripts mutation, and newly introduced install script are blocked', () => {
   const major = npmFixture('^1.2.3', '^2.0.0');
   assert.equal(
@@ -259,12 +288,12 @@ test('Actions updates require SHA pins and only uses-line changes, including pro
   );
 });
 
-test('governance config cannot silently enable major updates or unprotect control-plane workflows', () => {
+test('governance config permits only signed semantic classes and protects control-plane workflows', () => {
   assert.deepEqual(validateConfig(config), []);
   assert.ok(
     validateConfig({
       ...config,
-      allowedUpdateTypes: [...config.allowedUpdateTypes, 'version-update:semver-major'],
+      allowedUpdateTypes: [...config.allowedUpdateTypes, 'version-update:semver-prerelease'],
     }).length > 0,
   );
   assert.ok(validateConfig({ ...config, manualReviewPaths: [] }).length > 0);
@@ -373,7 +402,7 @@ test('provenance refuses spoofed bot identity, non-GitHub committer, invalid sig
   );
 });
 
-test('signed metadata independently refuses major update classes', () => {
+test('signed metadata accepts verified major class and rejects non-semver update types', () => {
   const patchCommit = {
     commit: {
       message: `x\nupdated-dependencies:\n- dependency-name: express\n  dependency-version: 5.2.2\n  dependency-type: direct:production\n  update-type: version-update:semver-patch\n...\n`,
@@ -385,6 +414,8 @@ test('signed metadata independently refuses major update classes', () => {
     },
   };
   assert.equal(validateSignedMetadata(patchCommit, config).eligible, true);
+  assert.equal(validateSignedMetadata(majorCommit, config).eligible, true);
+  majorCommit.commit.message = majorCommit.commit.message.replace('version-update:semver-major', 'version-update:unknown');
   assert.equal(validateSignedMetadata(majorCommit, config).eligible, false);
 });
 
