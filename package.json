@@ -26,7 +26,7 @@
     "webdriverio": "9.32.0"
   },
   "devDependencies": {
-    "@types/node": "24.19.1",
+    "@types/node": "24.19.2",
     "appium": "3.8.0",
     "typescript": "7.0.2"
   },
