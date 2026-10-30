@@ -6,7 +6,7 @@ This repository uses a review-only controller around GitHub's CodeQL Autofix RES
 
 The write-capable job runs only from trusted default-branch workflow code. Pull requests execute an unprivileged policy self-test only. The privileged job checks out `main` with credential persistence disabled and uses the repository-scoped `GITHUB_TOKEN` through a commit-SHA-pinned `actions/github-script` action.
 
-The controller has four write capabilities and no others: request an Autofix for an explicitly targeted CodeQL alert, create a dedicated fix branch from the exact current `main` SHA, ask GitHub to commit the generated Autofix to that branch, and create a draft pull request. It can also dispatch the repository's existing CI, Security, and Docs workflows against the fix branch.
+The controller has four write capabilities and no others: request an Autofix for a currently open CodeQL alert discovered through GitHub's authenticated API, create a dedicated fix branch from the exact current `main` SHA, ask GitHub to commit the generated Autofix to that branch, and create a normal, non-draft pull request for mandatory review. It can also dispatch the repository's existing CI, Security, and Docs workflows against the fix branch.
 
 It does **not** merge pull requests, dismiss alerts, rewrite `main`, execute generated branch code inside the privileged job, or weaken CodeQL/security policy.
 
@@ -14,14 +14,14 @@ It does **not** merge pull requests, dismiss alerts, rewrite `main`, execute gen
 
 A proposal is considered only when all of these conditions are true:
 
-- the alert number is explicitly present in `.github/codeql-autofix.json`;
+- the alert number appears in GitHub's authenticated inventory of open CodeQL findings, not in checked-in configuration;
 - the alert is still open;
 - the producing tool is CodeQL;
 - the most recent alert instance is on `refs/heads/main`;
 - that instance is attributed to the exact current `main` SHA;
 - GitHub Autofix reports a successful generated fix within a bounded polling window.
 
-The current pilot allowlist is alerts `1` and `2`. If CodeQL has already marked either alert fixed, the controller records a skip and performs no write.
+The controller deterministically selects up to `maxAlertsPerRun` live alerts (currently two) and queues the remainder for later runs. A verified empty alert inventory is a successful no-op. Malformed, unauthorized, or ambiguously truncated inventories fail closed. No alert numbers are persisted in configuration.
 
 ## Generated-diff validation
 
@@ -34,13 +34,13 @@ After GitHub commits an Autofix to the isolated branch, the controller compares 
 - the patch modifies workflow definitions, dependency manifests/lockfiles, Dockerfile, or Autofix/dependency-governance configuration;
 - `main` advances at any protected point in the generation/commit/review sequence.
 
-Protected repository scripts may be proposed because CodeQL can legitimately report findings in them, but the resulting pull request remains draft and requires the ordinary human/control-plane review path.
+Protected repository scripts may be proposed because CodeQL can legitimately report findings in them, but the resulting pull request is non-draft and still requires the ordinary human/control-plane review path.
 
 ## Qualification
 
-A successful proposal becomes a draft PR with the alert/rule/base/fix provenance embedded in its body. Because changes created with `GITHUB_TOKEN` do not reliably recurse into ordinary pull-request workflow triggers, the controller explicitly dispatches `ci.yml`, `security.yml`, and `docs.yml` on the generated branch.
+A successful proposal becomes a normal non-draft PR with the alert/rule/base/fix provenance embedded in its body. Because changes created with `GITHUB_TOKEN` do not reliably recurse into ordinary pull-request workflow triggers, the controller explicitly dispatches `ci.yml`, `security.yml`, and `docs.yml` on the generated branch.
 
-Those workflow results are evidence for review, not an authorization to merge. The generated PR remains draft until a human verifies the code change, the CodeQL finding, and the normal repository gates.
+Those workflow results are evidence for review, not an authorization to merge. A human must verify the code change, the CodeQL finding, and the normal repository gates before merging. The controller never approves or merges its own proposal; creating a non-draft PR changes its review presentation, not the protected merge boundary.
 
 ## Unsupported Autofix rules
 

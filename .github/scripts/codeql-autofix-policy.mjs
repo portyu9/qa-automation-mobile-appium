@@ -335,7 +335,7 @@ async function dispatchQualification(github, owner, repo, branch, workflows) {
   return outcomes;
 }
 
-async function createDraftPull(
+async function createReviewPull(
   github,
   owner,
   repo,
@@ -358,7 +358,7 @@ async function createDraftPull(
     `- Changed files: ${validation.files.map((file) => `\`${file}\``).join(', ')}`,
     `- Changed lines: ${validation.changedLines}`,
     '',
-    '**Review boundary:** this PR is intentionally draft and is never auto-merged by the autofix controller. Normal CI/security/docs qualification and human review remain required.',
+    '**Review boundary:** this PR is opened as a normal, non-draft proposal. The Autofix controller never auto-merges it; CI/security/docs qualification and owner review remain mandatory.',
   ].join('\n');
   const response = await github.rest.pulls.create({
     owner,
@@ -367,7 +367,7 @@ async function createDraftPull(
     head: branch,
     base: 'main',
     body,
-    draft: true,
+    draft: false,
     maintainer_can_modify: true,
   });
   return response.data;
@@ -532,7 +532,7 @@ export async function runCodeqlAutofix({
         continue;
       }
 
-      const pull = await createDraftPull(
+      const pull = await createReviewPull(
         github,
         owner,
         repo,
@@ -551,7 +551,7 @@ export async function runCodeqlAutofix({
         branch,
         config.qualificationWorkflows,
       );
-      result.state = 'draft-pr-created';
+      result.state = 'review-pr-created';
       results.push(result);
     } catch (error) {
       result.state = 'error';
