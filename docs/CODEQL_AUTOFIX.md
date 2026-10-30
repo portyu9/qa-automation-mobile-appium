@@ -34,7 +34,7 @@ After GitHub commits an Autofix to the isolated branch, the controller compares 
 - the patch modifies workflow definitions, dependency manifests/lockfiles, Dockerfile, or Autofix/dependency-governance configuration;
 - `main` advances at any protected point in the generation/commit/review sequence.
 
-Protected repository scripts may be proposed because CodeQL can legitimately report findings in them, but the resulting pull request is non-draft but still requires the ordinary human/control-plane review path.
+Protected repository scripts may be proposed because CodeQL can legitimately report findings in them, but the resulting pull request is non-draft and still requires the ordinary human/control-plane review path.
 
 ## Qualification
 
