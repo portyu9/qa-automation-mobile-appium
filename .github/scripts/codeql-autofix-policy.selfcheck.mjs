@@ -279,10 +279,10 @@ test('controller contains no autonomous merge or alert dismissal path', () => {
     source,
     /pulls\.merge|mergePull|enableAutoMerge|dismissed_reason|state:\s*['"]dismissed['"]/u,
   );
-  assert.match(source, /draft:\\s*false/u);
-  assert.doesNotMatch(source, /draft:\\s*true/u);
+  assert.match(source, /draft:\s*false/u);
+  assert.doesNotMatch(source, /draft:\s*true/u);
   assert.doesNotMatch(source, /createDraftPull/u);
-  assert.match(source, /result\\.state = 'review-pr-created'/u);
+  assert.match(source, /result\.state = 'review-pr-created'/u);
   assert.match(source, /owner review remain mandatory/u);
   assert.match(source, /createWorkflowDispatch/u);
   assert.match(source, /autofix\/commits/u);
