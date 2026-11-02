@@ -27,7 +27,7 @@
   },
   "devDependencies": {
     "@types/node": "24.19.2",
-    "appium": "3.8.0",
+    "appium": "3.9.0",
     "typescript": "7.0.2"
   },
   "overrides": {
