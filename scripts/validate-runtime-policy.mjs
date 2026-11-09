@@ -14,7 +14,7 @@ const workflows = Object.fromEntries(
 
 const failures = [];
 const fail = (message) => failures.push(message);
-const expectedNodeEngine = '>=22.0.0 <23.0.0 || >=24.0.0 <25.0.0';
+const expectedNodeEngine = '>=22.23.4 <23.0.0 || >=24.22.1 <25.0.0';
 const expectedNpm = '11.19.1';
 const exactVersion = /^(\d+)\.(\d+)\.(\d+)$/u;
 const nvmMatch = exactVersion.exec(nvmrc);
@@ -37,6 +37,32 @@ if (rootLock.engines?.npm !== packageJson.engines?.npm) {
 }
 if (!nvmMatch || Number(nvmMatch[1]) !== 24) {
   fail('.nvmrc must pin an exact Node 24 primary runtime');
+}
+
+// A Dependabot upgrade may raise minimum Node versions in nested dependency
+// engines without changing this repository's own engine declaration. Reject
+// a stale .nvmrc before the setup-node/npm ci jobs can misclassify it as a
+// dependency or security regression. The lockfile is the source of truth.
+if (nvmMatch) {
+  const primary = [Number(nvmMatch[1]), Number(nvmMatch[2]), Number(nvmMatch[3])];
+  const staleDependencyPins = [];
+  for (const [name, entry] of Object.entries(packageLock.packages ?? {})) {
+    const engine = entry?.engines?.node;
+    if (typeof engine !== 'string') continue;
+    for (const alternative of engine.split('||')) {
+      // Inspect explicit lower bounds for the supported Node 24 line.
+      const lower = /^\s*>=24\.(\d+)\.(\d+)(?:\s|$)/u.exec(alternative);
+      if (!lower) continue;
+      const required = [24, Number(lower[1]), Number(lower[2])];
+      const isBelow = primary.findIndex((value, i) => value !== required[i]);
+      if (isBelow !== -1 && primary[isBelow] < required[isBelow]) {
+        staleDependencyPins.push(`${name} requires Node >=${required.join('.')}`);
+      }
+    }
+  }
+  if (staleDependencyPins.length) {
+    fail(`.nvmrc ${nvmrc} is below locked dependency Node 24 minima: ${staleDependencyPins.join(', ')}`);
+  }
 }
 if (!primaryNodeTypesMatch || Number(primaryNodeTypesMatch[1]) !== 24) {
   fail('package.json @types/node must pin an exact Node 24 declaration release for the primary runtime');
