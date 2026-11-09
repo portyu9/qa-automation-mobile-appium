@@ -51,12 +51,11 @@ if (nvmMatch) {
     if (typeof engine !== 'string') continue;
     for (const alternative of engine.split('||')) {
       // Inspect explicit lower bounds for the supported Node 24 line.
-      const lower = /^\\s*>=24\\.(\\d+)\\.(\\d+)(?:\\s|$)/u.exec(alternative);
+      const lower = /^\s*>=24\.(\d+)\.(\d+)(?:\s|$)/u.exec(alternative);
       if (!lower) continue;
       const required = [24, Number(lower[1]), Number(lower[2])];
-      if (primary.some((value, index) => value !== required[index] && (
-        index === 0 || primary.slice(0, index).every((prior, i) => prior === required[i])
-      ) && value < required[index])) {
+      const isBelow = primary.findIndex((value, i) => value !== required[i]);
+      if (isBelow !== -1 && primary[isBelow] < required[isBelow]) {
         staleDependencyPins.push(`${name} requires Node >=${required.join('.')}`);
       }
     }
