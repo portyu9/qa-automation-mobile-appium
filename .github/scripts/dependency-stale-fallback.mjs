@@ -288,8 +288,8 @@ async function replayMissingPostMergeDispatches(api, pr, config, missing, now) {
   // unlimited Actions runs when GitHub never publishes a dispatch.
   if (receipts.length >= 8) fail('post-merge verification retry budget exhausted');
   await api.post('/issues/' + pr.number + '/comments', {
-    body: marker + '\nReplaying only missing exact-merge verification workflows for '
-      + pr.merge_commit_sha + '. Absent gates: ' + missing.map((gate) => gate.gate).join(', ')
+    body: marker + '\nReplaying only absent or conclusively cancelled exact-merge verification workflows for '
+      + pr.merge_commit_sha + '. Eligible gates: ' + missing.map((gate) => gate.gate).join(', ')
       + '. This receipt is a retry lease, never CI evidence or merge approval.',
   });
   const dispatched = [];
@@ -302,7 +302,7 @@ async function replayMissingPostMergeDispatches(api, pr, config, missing, now) {
     });
     dispatched.push(gate.gate);
   }
-  return { state: 'merged-awaiting-verification', retry: 'missing-gates-dispatched', dispatched };
+  return { state: 'merged-awaiting-verification', retry: 'eligible-gates-dispatched', dispatched };
 }
 
 async function postMergeProof(api, pr, config, source, now, filePath = 'Dockerfile') {
@@ -325,7 +325,7 @@ async function postMergeProof(api, pr, config, source, now, filePath = 'Dockerfi
   }
   const runs = await api.paginate('/actions/runs?head_sha=' + pr.merge_commit_sha + '&event=workflow_dispatch', 'workflow_runs');
   const proof = [];
-  const missing = [];
+  const retryable = [];
   for (const gate of config.requiredWorkflows) {
     const eligible = runs.filter((run) =>
       run.name === gate.workflow && run.path === '.github/workflows/' + gate.file
@@ -334,7 +334,14 @@ async function postMergeProof(api, pr, config, source, now, filePath = 'Dockerfi
       && Date.parse(run.created_at) >= Date.parse(pr.merged_at))
       .sort((a, b) => b.id - a.id);
     const run = eligible[0];
-    if (!run) missing.push(gate);
+    // A cancelled dispatch has no verdict on the recovered code. Only retry
+    // when EVERY observed exact-merge attempt was conclusively cancelled:
+    // never conceal a failed gate, duplicate an active run, or replace the
+    // latest unsuccessful result by borrowing an older green check.
+    if (!run || eligible.every((candidate) =>
+      candidate.status === 'completed' && candidate.conclusion === 'cancelled')) {
+      retryable.push(gate);
+    }
     if (!run || run.status !== 'completed' || run.conclusion !== 'success') { proof.push({ gate: gate.gate, state: 'pending' }); continue; }
     const jobs = await api.paginate('/actions/runs/' + run.id + '/jobs?filter=latest', 'jobs');
     proof.push({ gate: gate.gate, state: jobs.some((job) =>
@@ -342,8 +349,8 @@ async function postMergeProof(api, pr, config, source, now, filePath = 'Dockerfi
   }
   if (proof.some((item) => item.state !== 'success')) {
     if (now.getTime() - Date.parse(pr.merged_at) >= config.nativeRefreshEscalationMinutes * 4 * 60000) fail('post-merge exact-commit gates did not all succeed within deadline');
-    if (missing.length > 0) {
-      const retry = await replayMissingPostMergeDispatches(api, pr, config, missing, now);
+    if (retryable.length > 0) {
+      const retry = await replayMissingPostMergeDispatches(api, pr, config, retryable, now);
       return { ...retry, proof };
     }
     return { state: 'merged-awaiting-verification', proof };
