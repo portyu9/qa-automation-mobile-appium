@@ -82,8 +82,32 @@ async function maybeRef(api, branch) {
 }
 async function recoveryPull(api, branch) {
   const pulls = await api.paginate('/pulls?state=all&head=' + encodeURIComponent(api.owner + ':' + branch));
-  if (pulls.length > 1) fail('multiple recovery PRs share the deterministic branch');
-  return pulls[0] || null;
+  if (!Array.isArray(pulls) || pulls.length > 1) fail('ambiguous recovery PR list');
+  const listed = pulls[0];
+  if (!listed) return null;
+  if (!Number.isSafeInteger(listed.number) || listed.number < 1) fail('invalid listed recovery PR number');
+  // GitHub's LIST /pulls response omits the `merged` boolean. Never infer
+  // merged === false from an absent field: a merged signed recovery otherwise
+  // takes the already-accepted shortcut and closes source before CI proof.
+  const detail = await api.get('/pulls/' + listed.number);
+  if (detail?.number !== listed.number
+    || detail.state !== listed.state
+    || detail.head?.ref !== branch
+    || detail.head?.sha !== listed.head?.sha
+    || detail.base?.ref !== listed.base?.ref
+    || typeof detail.merged !== 'boolean') {
+    fail('recovery PR list/detail identity or merged state is unverified');
+  }
+  if (detail.merged === true
+    && (detail.state !== 'closed' || !SHA.test(detail.merge_commit_sha || '')
+      || !detail.merged_at || listed.merged_at !== detail.merged_at
+      || listed.merge_commit_sha !== detail.merge_commit_sha)) {
+    fail('recovery PR merged state conflicts with canonical PR details');
+  }
+  if (detail.merged === false && (detail.merged_at || listed.merged_at)) {
+    fail('recovery PR has ambiguous unmerged state');
+  }
+  return detail;
 }
 async function validateUnopenedBranch(api, base, revision, projected, filePath = 'Dockerfile') {
   if (!SHA.test(base) || !SHA.test(revision)) fail('branch publication refs are not immutable SHAs');
