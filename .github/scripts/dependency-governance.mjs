@@ -1348,6 +1348,13 @@ export async function verifyOwnerIdentity(ownerApi, config) {
   }
 }
 
+/** Verify the configured owner token before even an empty scheduled dependency sweep. */
+export async function verifyScheduledOwnerReadiness({ eventName, ownerApi, config }) {
+  if (eventName !== 'schedule') return { checked: false };
+  await verifyOwnerIdentity(ownerApi, config);
+  return { checked: true, identity: 'verified' };
+}
+
 export async function hasExactOwnerApproval(ownerApi, number, headSha, config) {
   const reviews = await ownerApi.paginate(`/pulls/${number}/reviews`);
   return reviews.some(
@@ -1769,6 +1776,7 @@ async function main() {
   const allowMerge = process.env.ALLOW_MERGE === 'true';
 
   if (eventName === 'schedule' || eventName === 'push') {
+    const ownerReadiness = await verifyScheduledOwnerReadiness({ eventName, ownerApi, config });
     const pulls = await api.paginate('/pulls?state=open');
     const dependabotPulls = pulls.filter(
       (pull) => pull.user?.login === config.botLogin && pull.user?.id === config.botUserId,
@@ -1778,7 +1786,7 @@ async function main() {
     );
     console.log(
       JSON.stringify(
-        { reconciled: reconciliation.results.length, failed: reconciliation.failures },
+        { reconciled: reconciliation.results.length, failed: reconciliation.failures, ownerReadiness },
         null,
         2,
       ),
