@@ -59,7 +59,7 @@ function fixture({
     files: files || [{ filename: filePath, status: 'modified', sha: sha(sourceText) }],
   };
   const filesByRef = new Map([[originalSha, sourceBaseText], [head, sourceText], [mainSha, mainText]]);
-  const state = { refs: new Map(), prs: [], comments: [...comments], wakeComments: [], wakeEvents: [], wakeFail: null, ownerPatches: [], apiPosts: [], reviews: [], merge: null, status: 'missing', main: mainSha, now };
+  const state = { refs: new Map(), prs: [], comments: [...comments], wakeComments: [], wakeEvents: [], wakeFail: null, ownerPatches: [], apiPosts: [], retryComments: [], dispatchFailOnce: false, postMergeRuns: null, reviews: [], merge: null, status: 'missing', main: mainSha, now };
   const recoveryBranch = 'dependency-recovery/' + (ecosystem === 'github-actions' ? 'actions-pr-' : 'docker-pr-') + '41-' + head.slice(0, 12);
   const api = {
     owner: 'o',
@@ -91,22 +91,36 @@ function fixture({
     async paginate(path) {
       if (path.startsWith('/pulls?')) return state.prs;
       if (path.startsWith('/pulls/') && path.endsWith('/files')) return [{ filename: filePath, status: 'modified' }];
-      if (path.startsWith('/actions/runs?')) return state.status === 'verified' ? config.requiredWorkflows.map((g, i) => ({
+      if (path.startsWith('/actions/runs?')) return state.postMergeRuns ?? (state.status === 'verified' ? config.requiredWorkflows.map((g, i) => ({
         id: i + 1, name: g.workflow, path: '.github/workflows/' + g.file, head_sha: state.merge,
         event: 'workflow_dispatch', status: 'completed', conclusion: 'success',
         created_at: '2026-11-17T03:10:00Z',
-      })) : [];
+      })) : []);
       if (path.startsWith('/actions/runs/') && path.includes('/jobs')) {
         const n = Number(path.split('/')[3]);
         return [{ name: config.requiredWorkflows[n - 1].gate, status: 'completed', conclusion: 'success' }];
       }
       if (path === '/issues/73/events') return state.wakeEvents;
+      if (path === '/issues/73/comments') return state.retryComments;
       if (path.includes('/reviews')) return state.reviews;
       if (path === '/issues?state=open') return (state.issues || []).filter((issue) => issue.state !== 'closed');
       throw new Error('fixture paginate ' + path);
     },
     async post(path, body) {
       state.apiPosts.push({ path, body });
+      if (path === '/issues/73/comments') {
+        state.retryComments.push({
+          id: 401 + state.retryComments.length,
+          user: { login: 'github-actions[bot]', id: 41898282 },
+          performed_via_github_app: { id: 15368, slug: 'github-actions' },
+          created_at: state.now.toISOString(), body: body.body,
+        });
+        return {};
+      }
+      if (path.endsWith('/dispatches') && state.dispatchFailOnce) {
+        state.dispatchFailOnce = false;
+        throw new Error('injected interruption during post-merge workflow dispatch');
+      }
       if (path === '/git/blobs') { state.blobText = body.content; return { sha: sha(body.content) }; }
       if (path === '/git/trees') return { sha: 'e'.repeat(40) };
       if (path === '/git/commits') {
@@ -244,6 +258,87 @@ test('fresh PR only merges after all exact-head gates and owner approval; postme
   assert.equal(verified.state, 'verified');
   assert.equal(f.source.state, 'closed');
 });
+test('post-merge dispatch interruption replays absent gates, with a durable retry lease and no premature source closure', async () => {
+  const f = fixture();
+  await run(f);
+  f.state.status = 'passed';
+  f.state.dispatchFailOnce = true;
+  await assert.rejects(() => run(f), /interruption during post-merge workflow dispatch/);
+  assert.equal(f.state.prs[0].merged, true, 'merge was accepted before dispatch failed');
+  assert.equal(f.source.state, 'open', 'original signed source remains open without exact-main gates');
+
+  const rescued = await run(f);
+  assert.equal(rescued.state, 'merged-awaiting-verification');
+  assert.equal(rescued.retry, 'missing-gates-dispatched');
+  assert.deepEqual(rescued.dispatched, config.requiredWorkflows.map((g) => g.gate));
+  assert.equal(f.state.retryComments.length, 1, 'bot-authored checkpoint persisted');
+  const requests = f.state.apiPosts.filter((item) => item.path.endsWith('/dispatches')).length;
+  const leased = await run(f);
+  assert.equal(leased.retry, 'durable-retry-lease-active');
+  assert.equal(f.state.apiPosts.filter((item) => item.path.endsWith('/dispatches')).length, requests,
+    'unobserved workflows do not cause unbounded repeated dispatches');
+  assert.equal(f.source.state, 'open');
+
+  f.state.status = 'verified';
+  const confirmed = await run(f);
+  assert.equal(confirmed.state, 'verified');
+  assert.equal(f.source.state, 'closed', 'only exact-main verified gates close signed source');
+});
+
+test('post-merge retry excludes already observed workflows even when incomplete', async () => {
+  const f = fixture();
+  await run(f);
+  f.state.status = 'passed';
+  await run(f);
+  const already = config.requiredWorkflows[0];
+  f.state.postMergeRuns = [{
+    id: 1, name: already.workflow, path: '.github/workflows/' + already.file,
+    head_sha: f.state.merge, event: 'workflow_dispatch',
+    created_at: '2026-11-17T03:10:00Z', status: 'in_progress', conclusion: null,
+  }];
+  const baseline = f.state.apiPosts.filter((item) => item.path.endsWith('/dispatches')).length;
+  const res = await run(f);
+  assert.equal(res.retry, 'missing-gates-dispatched');
+  assert.equal(res.dispatched.length, config.requiredWorkflows.length - 1);
+  assert.ok(!res.dispatched.includes(already.gate));
+  assert.equal(f.state.apiPosts.filter((item) => item.path.endsWith('/dispatches')).length,
+    baseline + config.requiredWorkflows.length - 1);
+  assert.equal(f.source.state, 'open');
+});
+
+test('post-merge retry refuses advanced main and never dispatches the wrong commit', async () => {
+  const f = fixture();
+  await run(f);
+  f.state.status = 'passed';
+  await run(f);
+  const baseline = f.state.apiPosts.filter((item) => item.path.endsWith('/dispatches')).length;
+  const newer = 'f'.repeat(40);
+  f.filesByRef.set(newer, f.state.blobText);
+  f.state.main = newer;
+  const res = await run(f);
+  assert.equal(res.retry, 'accepted-main-advanced');
+  assert.equal(f.state.apiPosts.filter((item) => item.path.endsWith('/dispatches')).length, baseline);
+  assert.equal(f.source.state, 'open');
+});
+
+test('interrupted retry checkpoint survives later wake and only replays after lease expires', async () => {
+  const f = fixture();
+  await run(f);
+  f.state.status = 'passed';
+  f.state.dispatchFailOnce = true;
+  await assert.rejects(() => run(f), /interruption during post-merge workflow dispatch/);
+  f.state.dispatchFailOnce = true;
+  await assert.rejects(() => run(f), /interruption during post-merge workflow dispatch/);
+  assert.equal(f.state.retryComments.length, 1);
+  const immediate = await run(f);
+  assert.equal(immediate.retry, 'durable-retry-lease-active');
+  f.state.now = new Date('2026-11-17T04:11:00Z');
+  const later = await run(f, { now: f.state.now });
+  assert.equal(later.retry, 'missing-gates-dispatched');
+  assert.equal(f.state.retryComments.length, 2);
+  assert.equal(f.source.state, 'open');
+});
+
 test('interrupted branch creation resumes only from exact verified Docker-only tree', async () => {
   const f = fixture();
   await run(f);
